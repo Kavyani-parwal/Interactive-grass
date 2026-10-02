@@ -2,8 +2,10 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-<title>Interactive grass — texture-driven</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Interactive grass</title>
+<meta name="description" content="A meadow to play with: trample, mow, water and burn the grass, and watch it grow back.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%233b7a26' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='M4 20h16M6.5 20c.2-4.6 1.6-8.4 4.6-11.6M11 20c.6-3.6 2.7-6.6 6.4-8.9M15.5 20c.9-2.1 2.4-3.6 4.5-4.6'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@500;600;700&family=DM+Sans:opsz,wght@9..40,400;9..40,500&display=swap" rel="stylesheet">
@@ -12,254 +14,596 @@
     --font-ui:'DM Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;
     --font-display:'Instrument Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
     --font-data:ui-monospace,'SF Mono','Cascadia Mono',Menlo,Consolas,monospace;
-    --ink:#182a10;
-    --ink-dim:rgba(24,42,16,.58);
-    --panel:rgba(255,255,255,.16);
-    --line:rgba(255,255,255,.45);
-    --edge:rgba(24,42,16,.22);
-    --fire:#b4501e;
-    --water:#19648a;
-    --cut:#8a6d10;
-    --step:#2c4a1c;
+    --ink:#1d2f17;
+    --ink-dim:rgba(29,47,23,.74);
+    --ink-faint:rgba(29,47,23,.54);
+    /* milky glass: dense enough to stay readable over bright grass,
+       and desaturated so the field's green doesn't flood the panels */
+    --glass:rgba(250,252,247,.6);
+    --glass-hi:rgba(255,255,255,.92);
+    --glass-hover:rgba(255,255,255,.5);
+    --rim:rgba(255,255,255,.62);
+    --hair:rgba(29,47,23,.1);
+    --lift:0 10px 30px rgba(18,40,14,.08), 0 1px 3px rgba(18,40,14,.05);
+    /* one colour per tool: ink for icons and accents, soft for fills */
+    --step:#3b7a26;  --step-soft:rgba(120,190,80,.20);
+    --cut:#8c6a12;   --cut-soft:rgba(230,190,70,.24);
+    --water:#226a91; --water-soft:rgba(90,170,220,.20);
+    --fire:#b4502b;  --fire-soft:rgba(245,140,90,.22);
+    --gap:16px;
+    --dock-h:64px;
+    --safe-t:env(safe-area-inset-top,0px);
+    --safe-b:env(safe-area-inset-bottom,0px);
   }
   *{box-sizing:border-box;margin:0;padding:0}
+  [hidden]{display:none !important}
   html,body{height:100%}
   body{
     overflow:hidden;
     font-family:var(--font-ui);
-    background:linear-gradient(#3f7fd6 0%, #9ec9e8 44%, #d5e8ea 60%, #79b350 61%, #47822f 100%);
+    background:linear-gradient(#3B9EE1 0%, #79C1ED 30%, #BBE2FA 52%, #4A9E27 53%, #27571A 100%);
     color:var(--ink);
+    -webkit-font-smoothing:antialiased;
+    -webkit-tap-highlight-color:transparent;
   }
-  #gl{position:fixed;inset:0;display:block;touch-action:none;cursor:crosshair}
+  #gl{position:fixed;inset:0;width:100%;height:100%;display:block;touch-action:none;cursor:default}
+
+  /* ── film: a very mild old-camera finish — soft focus, a light vignette,
+        a warm leak from the sun side, and barely-there grain ── */
+  #gl{filter:blur(.45px)}   /* the soft focus; off with ?film=0 or in the emergency quality tiers */
+  .film{
+    position:fixed;inset:0;z-index:1;pointer-events:none;overflow:hidden;
+    background:
+      radial-gradient(120% 90% at 50% 42%, transparent 58%, rgba(28,22,8,.18) 100%),
+      radial-gradient(60% 50% at 90% 10%, rgba(255,238,205,.10), transparent 70%);
+  }
+  .film::after{
+    content:"";position:absolute;inset:-50%;opacity:.05;mix-blend-mode:overlay;
+    background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+    animation:grain 1.2s steps(6) infinite;
+  }
+  @keyframes grain{
+    0%{transform:translate(0,0)} 20%{transform:translate(-4%,3%)} 40%{transform:translate(3%,-2%)}
+    60%{transform:translate(-2%,-4%)} 80%{transform:translate(4%,2%)} 100%{transform:translate(0,0)}
+  }
+  .no-film #gl, .soft-off #gl{filter:none}
+  .no-film .film{display:none}
+  button{font:inherit;color:inherit;border:0;background:none;appearance:none;touch-action:manipulation}
+  svg{display:block}
+  :focus-visible{outline:2px solid rgba(29,47,23,.45);outline-offset:2px}
+
+  [data-tool="step"] {--c:var(--step); --c-soft:var(--step-soft)}
+  [data-tool="cut"]  {--c:var(--cut);  --c-soft:var(--cut-soft)}
+  [data-tool="water"]{--c:var(--water);--c-soft:var(--water-soft)}
+  [data-tool="fire"] {--c:var(--fire); --c-soft:var(--fire-soft)}
 
   .glass{
-    background:var(--panel);
-    border:1px solid var(--line);
-    border-radius:14px;
-    backdrop-filter:blur(18px) saturate(1.6);
-    -webkit-backdrop-filter:blur(18px) saturate(1.6);
-    box-shadow:0 10px 30px rgba(20,50,15,.16), inset 0 1px 0 rgba(255,255,255,.55);
+    background:var(--glass);
+    border:1px solid var(--rim);
+    border-radius:18px;
+    backdrop-filter:blur(24px) saturate(.7) brightness(1.06);
+    -webkit-backdrop-filter:blur(24px) saturate(.7) brightness(1.06);
+    box-shadow:var(--lift), inset 0 1px 0 rgba(255,255,255,.45);
+  }
+  .sep{width:1px;height:20px;background:var(--hair);margin:0 6px;flex:none}
+  kbd{font-family:var(--font-data);font-size:10px;font-weight:500;line-height:1;color:var(--ink-faint)}
+
+  /* ── guide: what the current tool does, in a line ───── */
+  .guide{
+    position:fixed;top:calc(var(--gap) + var(--safe-t));left:var(--gap);z-index:5;pointer-events:none;
+    padding:13px 18px 14px 16px;width:max-content;
+    max-width:min(320px, calc(100vw - 460px));
+    transition:opacity .5s ease, transform .5s ease;
+  }
+  .guide h1{
+    font-family:var(--font-display);font-size:10px;font-weight:500;
+    letter-spacing:.2em;text-transform:uppercase;color:var(--ink-faint);
+  }
+  .guide .copy{margin-top:10px;min-width:0}
+  .guide .copy.swap{animation:swap .34s ease}
+  @keyframes swap{from{opacity:0;transform:translateY(3px)}}
+  .guide .name{
+    display:flex;align-items:center;gap:7px;
+    font-family:var(--font-display);font-size:13px;font-weight:600;
+    color:var(--ink);line-height:1.2;letter-spacing:.01em;white-space:nowrap;
+  }
+  .guide .name .ico{color:var(--c);transition:color .3s}
+  .guide .name .ico svg{width:15px;height:15px}
+  .guide .text{font-size:12px;line-height:1.5;color:var(--ink-dim);margin-top:4px}
+
+  /* ── top-right: one quiet panel for views + toggles ── */
+  .corner{
+    position:fixed;top:calc(var(--gap) + var(--safe-t));right:var(--gap);z-index:6;
+    display:flex;align-items:center;gap:2px;padding:4px;border-radius:15px;
+  }
+  .views{display:flex;gap:2px}
+  .views button, .icon-btn{
+    height:32px;border-radius:11px;cursor:pointer;color:var(--ink-dim);
+    transition:background .2s, color .2s, box-shadow .2s;
+  }
+  .views button{padding:0 12px;font-family:var(--font-display);font-size:12px;font-weight:500;letter-spacing:.02em}
+  .icon-btn{width:32px;display:grid;place-items:center}
+  .icon-btn svg{width:17px;height:17px}
+  .views button:hover, .icon-btn:hover{color:var(--ink);background:var(--glass-hover)}
+  .views button[aria-pressed="true"], .icon-btn[aria-pressed="true"], .icon-btn[aria-expanded="true"]{
+    color:var(--ink);background:var(--glass-hi);box-shadow:0 1px 3px rgba(18,40,14,.08);
+  }
+  .corner .sep{height:18px;margin:0 4px}
+  #soundBtn .snd-on{display:none}
+  #soundBtn[aria-pressed="true"] .snd-on{display:block}
+  #soundBtn[aria-pressed="true"] .snd-off{display:none}
+
+  /* ── tool dock ──────────────────────────────────────── */
+  .dock{
+    position:fixed;left:0;right:0;bottom:calc(var(--gap) + 2px + var(--safe-b));z-index:5;
+    display:flex;justify-content:center;padding:0 12px;pointer-events:none;
+  }
+  .tools{pointer-events:auto;display:flex;align-items:center;gap:2px;padding:5px;border-radius:19px}
+  .tool{
+    height:38px;padding:0 13px 0 11px;border-radius:14px;cursor:pointer;
+    display:flex;align-items:center;gap:8px;white-space:nowrap;
+    color:var(--ink-dim);font-family:var(--font-display);font-size:12.5px;font-weight:500;letter-spacing:.02em;
+    transition:background .25s, color .25s, box-shadow .25s;
+  }
+  .tool .ico{color:var(--c);opacity:.8;transition:opacity .2s, transform .2s}
+  .tool .ico svg{width:17px;height:17px}
+  .tool:hover{color:var(--ink);background:var(--glass-hover)}
+  .tool:hover .ico{opacity:1}
+  .tool:active .ico{transform:scale(.9)}
+  /* a light base under the tint keeps the active tool legible over any scene */
+  .tool[aria-pressed="true"]{
+    color:var(--ink);
+    background:linear-gradient(var(--c-soft), var(--c-soft)), var(--glass-hi);
+    box-shadow:0 1px 3px rgba(18,40,14,.08);
+  }
+  .tool[aria-pressed="true"] .ico{opacity:1}
+  #reset{--c:var(--ink-dim)}
+  #reset.spin .ico{animation:spin .6s cubic-bezier(.3,.7,.3,1)}
+  @keyframes spin{to{transform:rotate(-360deg)}}
+
+  .radius{
+    display:flex;align-items:center;gap:10px;padding:0 8px 0 6px;
+    font-family:var(--font-display);font-size:11.5px;color:var(--ink-faint);white-space:nowrap;
+  }
+  .radius input{-webkit-appearance:none;appearance:none;width:84px;height:20px;background:transparent;cursor:pointer}
+  .radius input::-webkit-slider-runnable-track{
+    height:3px;border-radius:3px;
+    background:linear-gradient(90deg, var(--c) 0 var(--fill,31%), rgba(29,47,23,.14) var(--fill,31%) 100%);
+  }
+  .radius input::-webkit-slider-thumb{
+    -webkit-appearance:none;width:14px;height:14px;margin-top:-5.5px;border-radius:50%;
+    background:#fff;box-shadow:0 1px 4px rgba(18,40,14,.22), 0 0 0 1px rgba(18,40,14,.06);
+  }
+  .radius input::-moz-range-track{height:3px;border-radius:3px;background:rgba(29,47,23,.14)}
+  .radius input::-moz-range-progress{height:3px;border-radius:3px;background:var(--c)}
+  .radius input::-moz-range-thumb{
+    width:14px;height:14px;border:0;border-radius:50%;
+    background:#fff;box-shadow:0 1px 4px rgba(18,40,14,.22), 0 0 0 1px rgba(18,40,14,.06);
   }
 
-  header{
-    position:fixed;top:14px;left:16px;z-index:5;pointer-events:none;
-    padding:12px 16px 13px;width:fit-content;
-    max-width:min(560px, calc(100vw - 32px));
+  /* ── first-run coach mark ───────────────────────────── */
+  .coach{
+    position:fixed;left:50%;top:58%;z-index:4;pointer-events:none;
+    display:flex;align-items:center;gap:12px;padding:10px 20px 10px 14px;border-radius:999px;
+    opacity:0;transform:translate(-50%,-50%) translateY(8px);
+    transition:opacity .7s ease, transform .7s ease;
   }
-  header h1{
-    font-family:var(--font-display);
-    font-size:15px;font-weight:600;letter-spacing:.14em;color:var(--ink);
+  .coach.glass, .toast.glass{background:rgba(250,252,247,.72)}
+  .coach.show{opacity:1;transform:translate(-50%,-50%)}
+  .coach.gone{opacity:0;transform:translate(-50%,-50%) translateY(-10px) scale(.98)}
+  .gesture{width:58px;height:30px;flex:none;overflow:visible}
+  .g-ground{stroke:rgba(29,47,23,.16);stroke-width:1.5;stroke-linecap:round}
+  .g-trail{
+    fill:none;stroke:var(--step);stroke-width:2.2;stroke-linecap:round;
+    stroke-dasharray:1;stroke-dashoffset:1;animation:trail 2.6s cubic-bezier(.45,0,.25,1) infinite;
   }
-  header p{
-    margin-top:6px;font-size:12px;letter-spacing:.01em;color:var(--ink-dim);line-height:1.5;
+  .g-tip circle{fill:#fff;stroke:var(--step);stroke-width:1.6}
+  @keyframes trail{
+    0%{stroke-dashoffset:1;opacity:.8}
+    70%{stroke-dashoffset:0;opacity:.8}
+    100%{stroke-dashoffset:0;opacity:0}
   }
-  header a{color:inherit}
+  .coach-title{font-family:var(--font-display);font-size:13.5px;font-weight:600;color:var(--ink);letter-spacing:.01em}
+  .coach-sub{font-size:11.5px;color:var(--ink-dim);margin-top:1px}
 
-  /* ── data-texture inspector ─────────────────────────── */
-  .chip{
-    position:fixed;bottom:20px;right:14px;z-index:6;
-    font-family:var(--font-display);font-size:11.5px;font-weight:500;letter-spacing:.03em;
-    color:var(--ink);padding:8px 14px;border-radius:999px;cursor:pointer;
-    appearance:none;
+  /* ── popovers ───────────────────────────────────────── */
+  .help, .inspector{position:fixed;top:calc(var(--gap) + var(--safe-t) + 50px);right:var(--gap)}
+  .help{z-index:7;padding:14px 16px 10px;width:252px}
+  .pop-title{
+    font-family:var(--font-display);font-size:10px;font-weight:500;
+    letter-spacing:.2em;text-transform:uppercase;color:var(--ink-faint);margin-bottom:6px;
   }
-  .chip:hover{background:rgba(255,255,255,.34)}
-  .chip:focus-visible{outline:2px solid var(--ink);outline-offset:1px}
-  .inspector{
-    position:fixed;bottom:66px;right:14px;z-index:5;
-    padding:10px 10px 8px;display:flex;gap:12px;
+  .help dl > div{
+    display:flex;justify-content:space-between;align-items:center;gap:12px;
+    padding:7px 0;border-top:1px solid var(--hair);
   }
-  .inspector.hidden{display:none}
+  .help dl > div:first-child{border-top:0}
+  .help dt{font-size:12px;color:var(--ink-dim)}
+  .help dd{display:flex;gap:4px}
+  .help kbd{
+    min-width:20px;height:20px;padding:0 6px;display:inline-grid;place-items:center;
+    border-radius:6px;background:rgba(255,255,255,.6);color:var(--ink-dim);
+    box-shadow:0 1px 0 rgba(29,47,23,.1);
+  }
+
+  .inspector{z-index:6;padding:12px 12px 10px;display:grid;grid-template-columns:auto auto;gap:10px 14px}
   .tex{display:flex;flex-direction:column;gap:6px;align-items:center}
   .tex canvas{
-    width:104px;height:104px;border-radius:6px;
-    image-rendering:pixelated;background:#151a10;
-    border:1px solid var(--edge);
+    width:104px;height:104px;border-radius:10px;
+    image-rendering:pixelated;background:#151a10;box-shadow:0 0 0 1px rgba(29,47,23,.08);
   }
-  .tex .name{font-family:var(--font-data);font-size:10px;letter-spacing:.08em;color:var(--ink)}
-  .tex .chan{font-family:var(--font-data);font-size:9px;color:var(--ink-dim);letter-spacing:.02em;text-align:center;line-height:1.5}
+  .tex .name{font-family:var(--font-data);font-size:10px;letter-spacing:.06em;color:var(--ink-dim)}
+  .tex .chan{font-family:var(--font-data);font-size:9px;color:var(--ink-faint);letter-spacing:.02em;text-align:center;line-height:1.55;max-width:112px}
   .chan b{font-weight:600}
-  .chan .r{color:#a33d2e}.chan .g{color:#3f7a24}.chan .b{color:#2b5f8a}.chan .a{color:#7a6a2c}
-
-  /* ── tool rail ──────────────────────────────────────── */
-  .tools{
-    position:fixed;left:50%;bottom:18px;transform:translateX(-50%);z-index:5;
-    display:flex;align-items:center;gap:6px;flex-wrap:nowrap;
-    max-width:none;white-space:nowrap;
-    padding:8px 10px;
-  }
-  .tools button{white-space:nowrap}
-  .tools button{
-    appearance:none;border:1px solid transparent;background:transparent;color:var(--ink-dim);
-    font-family:var(--font-display);font-size:12.5px;font-weight:500;letter-spacing:.02em;
-    padding:7px 13px;border-radius:8px;cursor:pointer;display:flex;gap:7px;align-items:center;
-  }
-  .tools button .key{
-    font-family:var(--font-data);font-size:9px;color:var(--ink-dim);border:1px solid var(--edge);
-    border-radius:3px;padding:1px 4px;line-height:1.3;
-  }
-  .tools button:hover{color:var(--ink);background:rgba(255,255,255,.18)}
-  .tools button:focus-visible{outline:2px solid var(--ink);outline-offset:1px}
-  .tools button[aria-pressed="true"]{background:rgba(255,255,255,.42);color:var(--step);border-color:var(--line);box-shadow:0 2px 8px rgba(20,50,15,.12)}
-  .tools button[data-tool="cut"][aria-pressed="true"]{color:var(--cut)}
-  .tools button[data-tool="water"][aria-pressed="true"]{color:var(--water)}
-  .tools button[data-tool="fire"][aria-pressed="true"]{color:var(--fire)}
-  .tools .sep{width:1px;height:22px;background:var(--edge);margin:0 3px}
-  .tools label{display:flex;align-items:center;gap:8px;font-size:11px;color:var(--ink-dim);padding:0 6px;white-space:nowrap}
-  .tools input[type=range]{width:78px;accent-color:var(--step)}
-  .tools #reset{
-    border:1px solid var(--edge);color:var(--ink);
-    background:rgba(255,255,255,.24);
-  }
-  .tools #reset:hover{background:rgba(255,255,255,.42)}
-  .tools #reset .key{border-color:var(--edge)}
-
-  .hint{
-    position:fixed;left:50%;bottom:66px;transform:translateX(-50%);z-index:4;
-    font-size:11px;letter-spacing:.02em;color:rgba(24,42,16,.68);pointer-events:none;
-    transition:opacity .6s;
+  .chan .r{color:#a8503f}.chan .g{color:#4a8630}.chan .b{color:#3a6f98}.chan .a{color:#86763a}
+  .inspector .perf{
+    grid-column:1 / -1;font-family:var(--font-data);font-size:9.5px;color:var(--ink-faint);
+    text-align:center;letter-spacing:.02em;border-top:1px solid var(--hair);padding-top:7px;
   }
 
-  /* ── view switcher ──────────────────────────────────── */
-  .views{
-    position:fixed;top:14px;right:14px;z-index:5;
-    display:flex;flex-direction:row;gap:3px;padding:6px;
+  .toast{
+    position:fixed;left:50%;bottom:calc(84px + var(--safe-b));z-index:7;pointer-events:none;
+    padding:8px 15px;border-radius:999px;font-size:12px;color:var(--ink-dim);white-space:nowrap;
+    opacity:0;transform:translate(-50%,6px);transition:opacity .35s, transform .35s;
   }
-  .views button{
-    appearance:none;border:1px solid transparent;background:transparent;color:var(--ink-dim);
-    font-family:var(--font-display);font-size:12px;font-weight:500;letter-spacing:.02em;
-    padding:6px 12px;border-radius:8px;cursor:pointer;text-align:left;
-  }
-  .views button:hover{color:var(--ink);background:rgba(255,255,255,.18)}
-  .views button:focus-visible{outline:2px solid var(--ink);outline-offset:1px}
-  .views button[aria-pressed="true"]{
-    background:rgba(255,255,255,.42);color:var(--step);
-    border-color:var(--line);box-shadow:0 2px 8px rgba(20,50,15,.12);
+  .toast.show{opacity:1;transform:translate(-50%,0)}
+
+  /* ── mid widths: keep the dock on one line ──────────── */
+  @media (max-width:1000px){
+    .radius > span{display:none}
+    .radius input{width:72px}
   }
 
+  /* ── touch: no keyboard, no shortcut hints ──────────── */
+  @media (pointer:coarse){
+    #helpBtn{display:none}
+  }
+
+  /* ── phones: guide on top, two-row dock at the bottom ─ */
   @media (max-width:720px){
-    /* top: header full width line, views tucked below it */
-    header{top:10px;left:10px;padding:10px 13px;max-width:calc(100vw - 20px)}
-    header h1{font-size:13px}
-    header p{font-size:11px}
-    .views{top:auto;bottom:70px;left:10px;right:auto;padding:4px;gap:2px}
-    .views button{padding:9px 11px;font-size:12px}
+    :root{--gap:10px}
+    .guide{left:10px;right:10px;width:auto;max-width:none;padding:11px 15px 12px}
+    .guide h1{display:none}
+    .guide .copy{margin-top:0}
+    .guide .text{font-size:11.5px}
 
-    /* bottom: toolbar scrolls if it must, chip and inspector stack above it */
-    .tools{bottom:12px;left:10px;right:10px;transform:none;justify-content:center;
-           gap:2px;padding:6px;max-width:none;overflow-x:auto}
-    .tools button{padding:10px 11px;font-size:12px}
-    .tools .key{display:none}
-    .tools label{display:none}
-    .tools .sep{display:none}
-    .chip{bottom:70px;right:10px;padding:9px 14px}
-    .inspector{bottom:118px;right:10px;transform:scale(.82);transform-origin:bottom right}
-    .hint{display:none}
+    .corner{top:auto;left:10px;right:10px;bottom:calc(12px + var(--dock-h) + 8px + var(--safe-b))}
+    .views{flex:1}
+    .views button{flex:1;padding:0 4px;height:36px}
+    .icon-btn{width:36px;height:36px}
+
+    .dock{bottom:calc(12px + var(--safe-b));padding:0 10px}
+    .tools{
+      width:100%;display:grid;grid-template-columns:repeat(5, minmax(56px, 1fr));
+      gap:2px;padding:4px;overflow-x:auto;scrollbar-width:none;
+    }
+    .tools::-webkit-scrollbar{display:none}
+    .tool{height:auto;flex-direction:column;justify-content:center;gap:4px;padding:8px 2px 7px;font-size:11px}
+    .tool .ico svg{width:19px;height:19px}
+    .radius, .dock .sep{display:none}
+
+    .inspector, .help{
+      top:auto;right:10px;transform:scale(.86);transform-origin:bottom right;
+      bottom:calc(12px + var(--dock-h) + 8px + 46px + 10px + var(--safe-b));
+    }
+    .coach{top:44%}
+    .toast{bottom:calc(12px + var(--dock-h) + 8px + 46px + 12px + var(--safe-b))}
+  }
+
+  /* ── compact: ?embed=1, or automatically inside a frame ─ */
+  .compact{--gap:10px;--dock-h:46px}
+  .compact .guide{padding:6px 15px 6px 12px;border-radius:999px;max-width:max(180px, calc(100vw - 300px))}
+  .compact .guide h1{display:none}
+  .compact .guide .copy{margin:0;display:flex;gap:8px;align-items:baseline}
+  .compact .guide .name{font-size:12px}
+  .compact .guide .text{font-size:11.5px;margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .compact .guide.idle{opacity:0;transform:translateY(-6px)}
+  .compact #dataBtn, .compact #helpBtn{display:none}
+  .compact .corner{padding:3px;border-radius:14px}
+  .compact .views button, .compact .icon-btn{height:30px}
+  .compact .views button{padding:0 10px;font-size:11.5px}
+  .compact .icon-btn{width:30px}
+  .compact .tools{padding:4px;border-radius:17px}
+  .compact .tool{height:34px;padding:0 10px;border-radius:13px}
+  .compact .tool .lbl, .compact .radius, .compact .sep-a{display:none}
+  .compact .coach{padding:7px 16px 7px 11px}
+  .compact .coach-sub{display:none}
+  .compact .toast{bottom:calc(60px + var(--safe-b))}
+  @media (max-width:720px){
+    .compact .guide{right:auto;max-width:calc(100vw - 20px)}
+    .compact .views button, .compact .icon-btn{height:32px}
+    .compact .tool{height:auto;padding:7px 2px}
+  }
+
+  @media (prefers-reduced-motion:reduce){
+    .g-trail{animation:none;stroke-dashoffset:0}
+    .guide, .coach, .toast{transition-duration:.01s}
+    .guide .copy.swap, #reset.spin .ico, .film::after{animation:none}
   }
 </style>
 </head>
 <body>
+<noscript><p style="position:fixed;inset:auto 0 45%;text-align:center;color:#fff">this meadow needs JavaScript.</p></noscript>
 <canvas id="gl"></canvas>
+<div class="film" aria-hidden="true"></div>
 
-<header class="glass">
-  <h1>INTERACTIVE&nbsp;GRASS</h1>
-  <p>trample a path, mow shapes, soak it, set it alight, then watch it all grow back.</p>
+<header class="guide glass" id="guide" data-tool="step" aria-live="polite">
+  <h1>Interactive grass</h1>
+  <div class="copy" id="guideCopy">
+    <p class="name"><span class="ico" id="guideIco" aria-hidden="true"></span><span id="guideName">trample</span></p>
+    <p class="text" id="guideText">move across the grass to flatten a path.</p>
+  </div>
 </header>
 
-<button id="dataToggle" class="chip glass" aria-expanded="false" aria-controls="inspector">show data</button>
+<div class="corner glass">
+  <nav class="views" aria-label="camera view">
+    <button data-view="scenic" aria-pressed="true"  title="scenic view (V)">scenic</button>
+    <button data-view="angled" aria-pressed="false" title="angled view (V)">angled</button>
+    <button data-view="top"    aria-pressed="false" title="top view (V)">top</button>
+  </nav>
+  <span class="sep" aria-hidden="true"></span>
+  <button class="icon-btn" id="dataBtn" aria-expanded="false" aria-controls="inspector"
+          aria-label="data textures" title="data textures (D)"><span data-icon="data"></span></button>
+  <button class="icon-btn" id="soundBtn" aria-pressed="false"
+          aria-label="sound" title="sound is off (M)"><span class="snd-off" data-icon="soundOff"></span><span class="snd-on" data-icon="soundOn"></span></button>
+  <button class="icon-btn" id="helpBtn" aria-expanded="false" aria-controls="help"
+          aria-label="keyboard shortcuts" title="keyboard shortcuts (?)"><span data-icon="keys"></span></button>
+</div>
 
-<aside id="inspector" class="inspector glass hidden" aria-label="live data textures">
+<div class="help glass" id="help" hidden>
+  <p class="pop-title">shortcuts</p>
+  <dl>
+    <div><dt>trample · cut · water · burn</dt><dd><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd><kbd>4</kbd></dd></div>
+    <div><dt>brush size</dt><dd><kbd>[</kbd><kbd>]</kbd></dd></div>
+    <div><dt>next view</dt><dd><kbd>V</kbd></dd></div>
+    <div><dt>let it all grow back</dt><dd><kbd>R</kbd></dd></div>
+    <div><dt>sound</dt><dd><kbd>M</kbd></dd></div>
+    <div><dt>data textures</dt><dd><kbd>D</kbd></dd></div>
+  </dl>
+</div>
+
+<aside id="inspector" class="inspector glass" aria-label="live data textures" hidden>
   <div class="tex">
     <canvas id="windPreview" width="96" height="96"></canvas>
     <span class="name">wind_override</span>
-    <span class="chan"><b class="r">r</b> lean&nbsp;x · <b class="b">b</b> lean&nbsp;z · <b class="a">a</b> wind</span>
+    <span class="chan"><b class="r">r</b> lean&nbsp;x · <b class="g">g</b> crush · <b class="b">b</b> lean&nbsp;z · <b class="a">a</b> wind</span>
   </div>
   <div class="tex">
     <canvas id="metaPreview" width="96" height="96"></canvas>
-    <span class="name">cut_wet_burn</span>
-    <span class="chan"><b class="r">r</b> cut · <b class="g">g</b> wet · <b class="b">b</b> burn</span>
+    <span class="name">cut_wet_char</span>
+    <span class="chan"><b class="r">r</b> cut · <b class="g">g</b> wet · <b class="b">b</b> char · <b class="a">a</b> heat</span>
   </div>
+  <p class="perf" id="perfLine"></p>
 </aside>
 
-<div class="hint" id="hint">hover to trample · pick a brush and drag</div>
-
-<div class="tools glass" role="toolbar" aria-label="brushes">
-  <button data-tool="step"  aria-pressed="true"><span class="key">1</span>trample</button>
-  <button data-tool="cut"   aria-pressed="false"><span class="key">2</span>cut</button>
-  <button data-tool="water" aria-pressed="false"><span class="key">3</span>water</button>
-  <button data-tool="fire"  aria-pressed="false"><span class="key">4</span>burn</button>
-  <div class="sep"></div>
-  <label>radius <input type="range" id="radius" min="4" max="20" value="9" step="1"></label>
-  <div class="sep"></div>
-  <button id="reset" title="clear cuts, water, fire and trampling"><span class="key">R</span>reset</button>
+<div class="coach glass" id="coach" aria-hidden="true">
+  <svg class="gesture" viewBox="0 0 64 34">
+    <path class="g-ground" d="M6 30h52"/>
+    <path class="g-trail" d="M8 24 C 22 9, 42 9, 56 24" pathLength="1"/>
+    <g class="g-tip">
+      <circle r="4.6"/>
+      <animateMotion dur="2.6s" repeatCount="indefinite" calcMode="spline"
+        keyPoints="0;1;1" keyTimes="0;.7;1" keySplines=".45 0 .25 1;0 0 1 1"
+        path="M8 24 C 22 9, 42 9, 56 24"/>
+      <animate attributeName="opacity" values="0;1;1;0" keyTimes="0;.08;.72;1" dur="2.6s" repeatCount="indefinite"/>
+    </g>
+  </svg>
+  <div>
+    <p class="coach-title" id="coachTitle">sweep across the grass</p>
+    <p class="coach-sub">press and hold to tread it flat</p>
+  </div>
 </div>
 
-<nav class="views glass" aria-label="scene view">
-  <button data-view="scenic" aria-pressed="true">scenic</button>
-  <button data-view="angled" aria-pressed="false">angled</button>
-  <button data-view="top"    aria-pressed="false">top</button>
-</nav>
+<div class="dock">
+  <div class="tools glass" id="tools" role="toolbar" aria-label="brushes" data-tool="step">
+    <button class="tool" data-tool="step"  aria-pressed="true"  aria-keyshortcuts="1" title="trample (1)"><span class="ico" data-icon="step"></span><span class="lbl">trample</span></button>
+    <button class="tool" data-tool="cut"   aria-pressed="false" aria-keyshortcuts="2" title="cut (2)"><span class="ico" data-icon="cut"></span><span class="lbl">cut</span></button>
+    <button class="tool" data-tool="water" aria-pressed="false" aria-keyshortcuts="3" title="water (3)"><span class="ico" data-icon="water"></span><span class="lbl">water</span></button>
+    <button class="tool" data-tool="fire"  aria-pressed="false" aria-keyshortcuts="4" title="burn (4)"><span class="ico" data-icon="fire"></span><span class="lbl">burn</span></button>
+    <span class="sep sep-a" aria-hidden="true"></span>
+    <label class="radius" title="brush size ([ and ])"><span>size</span><input type="range" id="radius" min="2" max="16" value="5" step="1"></label>
+    <span class="sep sep-b" aria-hidden="true"></span>
+    <button class="tool" id="reset" aria-keyshortcuts="R" title="let everything grow back (R)"><span class="ico" data-icon="reset"></span><span class="lbl">reset</span></button>
+  </div>
+</div>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<div class="toast glass" id="toast" role="status"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"
+        integrity="sha512-dLxUelApnYxpLt6K2iomGngnHO83iUvZytA3YjDUCjT0HDOHKXnVYdf3hU4JjM8uEhxf9nD1/ey98U3t2vZ0qQ=="
+        crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 <script>
 (function(){
 'use strict';
-if (!window.THREE){ document.getElementById('hint').textContent = 'failed to load three.js'; return; }
+
+const $ = id => document.getElementById(id);
+
+/* ────────────────────────────────────────────────────────
+   url flags
+   ?embed=1    compact chrome for a framed section (on by default
+               when the page is inside an iframe; ?embed=0 opts out)
+   ?view=      scenic | angled | top
+   ?tool=      trample | cut | water | burn
+   ?quality=   low | high (default: auto — steps down if frames drop)
+   ?film=0     no old-camera finish (soft focus, vignette, grain)
+──────────────────────────────────────────────────────── */
+const Q = new URLSearchParams(location.search);
+const truthy = v => v !== null && !/^(0|false|no|off)$/i.test(v);
+let framed = false;
+try { framed = window.self !== window.top; } catch (e) { framed = true; }
+const COMPACT = Q.has('embed') ? truthy(Q.get('embed')) : framed;
+document.documentElement.classList.toggle('compact', COMPACT);
+document.documentElement.classList.toggle('no-film', Q.has('film') && !truthy(Q.get('film')));
+const QUALITY = Q.get('quality');
+
+const RM        = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const COARSE    = matchMedia('(pointer: coarse)').matches;
+const IS_MOBILE = matchMedia('(max-width: 720px), (pointer: coarse)').matches;
+
+/* ────────────────────────────────────────────────────────
+   icons — drawn once, dropped into every [data-icon] slot
+──────────────────────────────────────────────────────── */
+const svg = d => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
+const ICONS = {
+  step:  svg('<path d="M4 20h16"/><path d="M6.5 20c.2-4.6 1.6-8.4 4.6-11.6"/><path d="M11 20c.6-3.6 2.7-6.6 6.4-8.9"/><path d="M15.5 20c.9-2.1 2.4-3.6 4.5-4.6"/>'),
+  cut:   svg('<circle cx="6.5" cy="7" r="2.6"/><circle cx="6.5" cy="17" r="2.6"/><path d="M8.7 8.4 20 17"/><path d="M8.7 15.6 20 7"/>'),
+  water: svg('<path d="M12 3.5c3.2 3.9 6 7.2 6 10.6a6 6 0 0 1-12 0c0-3.4 2.8-6.7 6-10.6z"/><path d="M9.3 14.4a2.9 2.9 0 0 0 2.4 2.7"/>'),
+  fire:  svg('<path d="M12 3c1 3.5 6 6 6 11a6 6 0 0 1-12 0c0-2.5 1.2-4.2 2.6-5.4.2 1.8 1 3 2.2 3.4-.6-3.4 0-6.4 1.2-9z"/>'),
+  reset: svg('<path d="M4 12a8 8 0 1 0 2.6-5.9L4 8.5"/><path d="M4 4v4.5h4.5"/>'),
+  data:  svg('<rect x="3.5" y="4.5" width="7.5" height="7.5" rx="1.6"/><rect x="13" y="4.5" width="7.5" height="7.5" rx="1.6"/><path d="M4 16.5h6.5M13.5 16.5h6.5M4 19.5h4M13.5 19.5h4"/>'),
+  keys:  svg('<rect x="2.5" y="6" width="19" height="12" rx="2.5"/><path d="M6.5 10h.01M10 10h.01M14 10h.01M17.5 10h.01M7.5 14h9"/>'),
+  soundOff: svg('<path d="M4 9.5h3.2L12 5.5v13l-4.8-4H4z"/><path d="m16 9.5 5 5M21 9.5l-5 5"/>'),
+  soundOn:  svg('<path d="M4 9.5h3.2L12 5.5v13l-4.8-4H4z"/><path d="M15.6 9.2a4 4 0 0 1 0 5.6"/><path d="M18.2 6.6a7.6 7.6 0 0 1 0 10.8"/>'),
+};
+document.querySelectorAll('[data-icon]').forEach(el => { el.innerHTML = ICONS[el.dataset.icon]; });
+
+/* the corner guide reads as an instruction for whichever tool is in hand */
+const TOOL_INFO = {
+  step:  { name:'trample', short: COARSE ? 'drag to tread' : 'hover to brush, hold to flatten',
+           text: COARSE ? 'drag across the grass to tread a path. hold longer to press it flat.'
+                        : 'hover to brush the grass. press and hold to tread it flat, and it stands back up slowly.' },
+  cut:   { name:'cut', short:'drag to mow',
+           text:'press and drag to mow. a mown strip stops fire in its tracks.' },
+  water: { name:'water', short:'drag to soak',
+           text:'press and drag to soak the ground. wet grass won’t catch.' },
+  fire:  { name:'burn', short: COARSE ? 'tap to ignite' : 'click to ignite',
+           text:(COARSE ? 'tap' : 'click') + ' to set it alight, or drag a fire line. it smoulders, chars, then grows back.' },
+};
+const TOOL_ALIAS = { trample:'step', step:'step', cut:'cut', mow:'cut', water:'water', burn:'fire', fire:'fire' };
+const has = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
+
+$('guideIco').innerHTML = ICONS.step;
+if (!window.THREE){
+  $('guideName').textContent = 'offline';
+  $('guideText').textContent = 'couldn’t load three.js. check the connection and reload.';
+  return;
+}
 
 /* ────────────────────────────────────────────────────────
    constants
 ──────────────────────────────────────────────────────── */
 const SPAN = 14;                 // field extends (-SPAN, SPAN) on x and z
 const T    = 160;                // data texture size
-const RM   = matchMedia('(prefers-reduced-motion: reduce)').matches;
-const IS_MOBILE = matchMedia('(max-width: 720px), (pointer: coarse)').matches;
-const BLADES = (innerWidth > 900 ? 380000 : 130000);
-const TICK_HZ = 30;              // texture logic runs at fixed 30fps (per the article)
+const N    = T*T;
+const MAX_BLADES = QUALITY === 'low' ? 200000
+                 : (innerWidth > 900 || QUALITY === 'high') ? 650000 : 200000;
+const TICK_HZ = 30;              // the texture simulation runs at a fixed 30 ticks a second
+const TICK_DT = 1/TICK_HZ;
+
+// how long things take to come back, in seconds
+const TRAMPLE_HOLD = 1.1;        // a fresh path stays flat this long…
+const TRAMPLE_RISE = 9.5;        // …then stands back up over this long
+const CUT_REGROW   = 22;
+const WET_DRY      = 30;
+const HEAT_COOL    = 3.6;        // flames die down into a short smoulder
+const CHAR_LINGER  = 7;          // black char holds…
+const CHAR_FADE    = 16;         // …then greys into ash, greens over, and only then regrows
+const MAX_LEAN     = 1.32;       // radians a fully trampled blade lies over
 
 /* ────────────────────────────────────────────────────────
    data textures — the whole trick lives in these bytes
 ──────────────────────────────────────────────────────── */
-function makeTex(fillR, fillG, fillB, fillA){
-  const buf     = new ArrayBuffer(T*T*4);
-  const data    = new Uint8Array(buf);
-  const clamped = new Uint8ClampedArray(buf);      // same memory, for canvas preview
-  for (let i=0;i<data.length;i+=4){ data[i]=fillR; data[i+1]=fillG; data[i+2]=fillB; data[i+3]=fillA; }
+function makeTex(fill){
+  const buf  = new ArrayBuffer(N*4);
+  const data = new Uint8Array(buf);
+  const px   = new Uint8ClampedArray(buf);       // same memory: writes round and clamp
+  for (let i=0;i<data.length;i+=4){ data[i]=fill[0]; data[i+1]=fill[1]; data[i+2]=fill[2]; data[i+3]=fill[3]; }
   const tex = new THREE.DataTexture(data, T, T, THREE.RGBAFormat);
   tex.minFilter = THREE.LinearFilter;
   tex.magFilter = THREE.LinearFilter;
   tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
   tex.needsUpdate = true;
-  return { tex, data, img: new ImageData(clamped, T, T) };
+  return { tex, data, px };
 }
-// r: lean over x, b: lean over z (0.5 = upright), a: how much generated wind applies
-const wind = makeTex(128, 0, 128, 255);
-// r: cut amount, g: wetness, b: burn amount
-const meta = makeTex(0, 0, 0, 255);
+// r: lean over x, g: crush (how flattened), b: lean over z (0.5 = upright), a: how much generated wind applies
+const wind = makeTex([128, 0, 128, 255]);
+// r: cut amount, g: wetness, b: char, a: heat (flame, then smoulder)
+const meta = makeTex([0, 0, 0, 0]);
+
+// the simulation runs on floats so recovery can be slow and eased;
+// every tick it is quantised into the two textures above
+const sim = {
+  dirX:  new Float32Array(N),    // which way trampled grass lies
+  dirZ:  new Float32Array(N),
+  crush: new Float32Array(N),    // 0..1 how flattened
+  hold:  new Float32Array(N),    // seconds before a flattened texel starts to rise
+  cut:   new Float32Array(N),
+  wet:   new Float32Array(N),
+  char:  new Float32Array(N),
+  heat:  new Float32Array(N),
+  scorch:new Float32Array(N),    // seconds the char lingers before it heals
+};
+// per-texel constants: recovery jitter, and a lie-down direction for grass
+// pressed straight down. the jitter is mostly smooth noise, so a patch
+// heals in organic blotches rather than salt-and-pepper (or stripes)
+const jit = new Float32Array(N), fbX = new Float32Array(N), fbZ = new Float32Array(N);
+const h2 = (x, y) => { const s = Math.sin(x*127.1 + y*311.7)*43758.5453; return s - Math.floor(s); };
+// smooth value noise, used for the jitter here and for every patchy pattern in the field
+function vnoise(x, z){
+  const xi = Math.floor(x), zi = Math.floor(z), xf = x - xi, zf = z - zi;
+  const u = xf*xf*(3-2*xf), v = zf*zf*(3-2*zf);
+  return h2(xi,zi)*(1-u)*(1-v) + h2(xi+1,zi)*u*(1-v) + h2(xi,zi+1)*(1-u)*v + h2(xi+1,zi+1)*u*v;
+}
+for (let p=0;p<N;p++){
+  const x = p % T, y = (p/T)|0;
+  jit[p] = .75*vnoise(x*.21 + 3.7, y*.21 + 1.3) + .25*h2(x + .5, y + .5);
+  const a = h2(y + 17.3, x + 4.1) * Math.PI*2;
+  fbX[p] = Math.cos(a); fbZ[p] = Math.sin(a);
+}
 
 /* ────────────────────────────────────────────────────────
    renderer / scene
 ──────────────────────────────────────────────────────── */
-const canvas   = document.getElementById('gl');
-const renderer = new THREE.WebGLRenderer({canvas, antialias:true, alpha:true});
-renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
-renderer.setSize(innerWidth, innerHeight);
+const canvas   = $('gl');
+let renderer;
+try { renderer = new THREE.WebGLRenderer({canvas, antialias:true, alpha:true}); }
+catch (e){
+  $('guideName').textContent = 'no WebGL';
+  $('guideText').textContent = 'this meadow needs WebGL, which this browser or device has turned off.';
+  $('coach').hidden = true;
+  return;
+}
 
 const scene  = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(46, innerWidth/innerHeight, .1, 260);
+const camera = new THREE.PerspectiveCamera(46, innerWidth/innerHeight, .1, 340);
 camera.position.set(0, 4.1, 15.6);
 camera.lookAt(0, 1.6, 0);
 
-const FOG = new THREE.Color('#d5e8ea');
+const FOG = new THREE.Color('#A9D3D8');     // soft morning haze, a touch teal
+// where land and sky meet: the muted teal of the reference photo's far hills
+// (#519294, #6EABBE), paler toward the sun. distance makes things lighter and
+// bluer, never greyer. the sky's lowest band and the farthest land both use it
+// (needs a sunDir uniform in scope)
+const HORIZON_GLSL = `
+  vec3 horizonAt(vec3 dir){
+    float sunSide = dot(normalize(dir.xz + vec2(1e-5)), normalize(sunDir.xz));
+    return mix(vec3(0.494, 0.722, 0.749), vec3(0.741, 0.886, 0.902), smoothstep(-0.6, 0.95, sunSide));   // #7EB8BF → #BDE2E6
+  }`;
+// one sun for everything — the sky's glow, slope light, cast shadows, backlight:
+// afternoon, to the right and a little ahead of the scenic camera
+const SUN_U = { value: new THREE.Vector3(0.689, 0.438, -0.578).normalize() };
 // fog range as shared uniforms: the frame loop relaxes these in top view,
 // where the camera sits high enough that fixed fog would wash the field out
-const FOGN = { value: 19.0 };
-const FOGF = { value: 46.0 };
+const FOGN = { value: 6.0 };
+const FOGF = { value: 64.0 };
+const GRADE_GLSL = `
+  vec3 grade(vec3 c){
+    // a faded, gently warm film look: a touch less saturation,
+    // blacks lifted a little, whites rolled off softly
+    float l = dot(c, vec3(0.299, 0.587, 0.114));
+    c = mix(vec3(l), c, 0.95);
+    return mix(vec3(0.07, 0.075, 0.07), vec3(0.97, 0.96, 0.92), clamp(c, 0.0, 1.0));
+  }`;
+const TIME = { value: 0 };
+const PXSCALE = { value: 1000 };   // pixels per world unit at depth 1, for sized points
+
 
 /* ────────────────────────────────────────────────────────
-   sky — gradient, drifting clouds, hazy hills on the horizon
+   sky — gradient, sun glow, high wisps and drifting cumulus
 ──────────────────────────────────────────────────────── */
 const skyMat = new THREE.ShaderMaterial({
   side: THREE.BackSide, depthWrite: false,
-  uniforms: { time: { value: 0 } },
+  uniforms: { time: { value: 0 }, sunDir: SUN_U },
   vertexShader: `
     varying vec3 vDir;
     void main(){ vDir = position;
@@ -267,7 +611,10 @@ const skyMat = new THREE.ShaderMaterial({
   fragmentShader: `
     precision highp float;
     uniform float time;
+    uniform vec3 sunDir;
     varying vec3 vDir;
+    ${GRADE_GLSL}
+    ${HORIZON_GLSL}
     float h21(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7)))*43758.5453); }
     float vn(vec2 p){
       vec2 i = floor(p), f = fract(p);
@@ -275,30 +622,109 @@ const skyMat = new THREE.ShaderMaterial({
       return mix(mix(h21(i), h21(i+vec2(1,0)), u.x),
                  mix(h21(i+vec2(0,1)), h21(i+vec2(1,1)), u.x), u.y);
     }
-    float fbm(vec2 p){
+    // finer octaves slide a little against the coarse ones, so cloud
+    // edges churn and reshape while the whole deck drifts
+    float fbm(vec2 p, vec2 churn){
       float v = 0.0, a = 0.5;
-      for (int k=0;k<5;k++){ v += a*vn(p); p *= 2.03; a *= 0.5; }
+      for (int k=0;k<5;k++){ v += a*vn(p); p = p*2.03 + churn; a *= 0.5; }
       return v;
     }
     void main(){
       vec3 d = normalize(vDir);
       float elev = d.y;
-      vec3 zen = vec3(0.16, 0.42, 0.80);
-      vec3 hor = vec3(0.84, 0.91, 0.93);
-      vec3 col = mix(hor, zen, pow(clamp(elev, 0.0, 1.0), 0.55));
+      // the reference photo's sky: a teal-cerulean that leans with the light,
+      // pale aqua low on the sun's side, deepening up and away from it. the
+      // stops overlap widely, so it runs as one smooth gradient
+      float sunSide = dot(normalize(d.xz + vec2(1e-5)), normalize(sunDir.xz));
+      float t = clamp(2.7 * elev + 0.42 - 0.43 * sunSide, 0.0, 1.0);
+      vec3 col = vec3(0.741, 0.922, 0.937);                                            // #BDEBEF pale aqua
+      col = mix(col, vec3(0.573, 0.859, 0.949), smoothstep(0.0, 0.4, t));               // #92DBF2
+      col = mix(col, vec3(0.361, 0.741, 0.902), smoothstep(0.2, 0.65, t));              // #5CBDE6
+      col = mix(col, vec3(0.192, 0.592, 0.796), smoothstep(0.45, 0.9, t));              // #3197CB
+      col = mix(col, vec3(0.102, 0.502, 0.706), smoothstep(0.7, 1.0, t));               // #1A80B4 deep, away from the sun
+      // down at the hills it settles into the horizon's muted teal haze
+      col = mix(horizonAt(d), col, smoothstep(-0.01, 0.05, elev));
+      // the sun sits just out of frame: a warm haze and halo on its side of the sky
+      float sd = max(dot(d, sunDir), 0.0);
+      vec3 glow = vec3(1.0, 0.94, 0.80) * (pow(sd, 6.0) * 0.08 + pow(sd, 40.0) * 0.12);
+      col += glow;
 
-      // clouds projected on a virtual plane above
-      if (elev > 0.015){
-        vec2 cp = d.xz / (elev + 0.12);
-        float cl = fbm(cp*0.9 + vec2(time*0.008, time*0.003));
-        float mask = smoothstep(0.50, 0.78, cl) * smoothstep(0.02, 0.16, elev);
-        vec3 cloud = mix(vec3(0.76, 0.80, 0.85), vec3(1.0), smoothstep(0.55, 1.0, cl));
-        col = mix(col, cloud, mask * 0.95);
+      // clouds projected on a virtual deck overhead
+      if (elev > 0.0){
+        vec2 cp   = d.xz / (elev + 0.12);
+        vec2 cpc  = d.xz / (elev + 0.32);   // cumulus: less perspective squash, so heaps stay round low down
+        vec2 wind = vec2(0.92, 0.38);                  // same heading as the grass wind
+        vec2 side = vec2(-wind.y, wind.x);
+        float fade = smoothstep(0.008, 0.09, elev);    // thin out into the horizon haze
+
+        // high wisps: stretched along the wind, drifting slowly
+        vec2 hp = cp * 0.5 - wind * time * 0.012;
+        float hi = fbm(vec2(dot(hp, wind) * 0.45, dot(hp, side) * 1.6), vec2(time * 0.002));
+        col = mix(col, vec3(0.93, 0.97, 0.98), smoothstep(0.54, 0.86, hi) * 0.13 * fade);
+
+        // clouds like drifting smoke: light, soft veils with no hard edge, thin
+        // enough for the blue to show through. a slower noise pushes the pattern
+        // around so the edges curl and stream with the wind, the shapes run a
+        // little long along it, and each veil slowly gathers and thins away
+        vec2 p = cpc * 1.15 - wind * time * 0.05;
+        vec2 churn = vec2(time * 0.005, -time * 0.0035);
+        vec2 flow = vec2(vn(p * 0.45 + vec2(time * 0.012, 3.1)), vn(p * 0.45 + vec2(7.7, -time * 0.01))) - 0.5;
+        vec2 q = p + flow * 1.1;
+        vec2 alongWind = vec2(dot(q, wind) * 0.8, dot(q, side) * 1.15);
+        float gather = vn(q * 0.3 + 11.3) * 0.6 + vn(q * 0.62 + 3.1) * 0.4
+                     + (vn(p * 0.18 + vec2(time * 0.015, 0.0)) - 0.5) * 0.35;      // where veils form, waxing and waning
+        float n = fbm(alongWind * 0.72, churn) + (gather - 0.5) * 0.7;
+        float dens = smoothstep(0.40, 0.66, n) * 0.62 * smoothstep(0.02, 0.14, elev);   // feathered all the way out; the horizon stays clear
+        // light from above: a step higher in the sky, is the veil thinner?
+        vec2 qUp = q - normalize(cpc + vec2(1e-4)) * 0.08;
+        float nUp = fbm(vec2(dot(qUp, wind) * 0.8, dot(qUp, side) * 1.15) * 0.72, churn) + (gather - 0.5) * 0.7;
+        float lit = smoothstep(-0.05, 0.08, n - nUp);
+        vec3 cloud = mix(vec3(0.86, 0.93, 0.95), vec3(0.95, 0.985, 0.98), lit);     // a faint teal shade under, soft white above
+        cloud += glow * 0.4;
+        col = mix(col, cloud, dens * fade);
       }
-      gl_FragColor = vec4(col, 1.0);
+      gl_FragColor = vec4(grade(col), 1.0);
     }`
 });
-scene.add(new THREE.Mesh(new THREE.SphereGeometry(180, 40, 28), skyMat));
+// the clouds are soft, so the sky is painted at half resolution into an image
+// of its own each frame, then stretched over whatever sky the field leaves showing
+const SKY_SCALE = 0.5;
+const skyGeo = new THREE.SphereGeometry(320, 40, 28);
+const skyScene = new THREE.Scene();
+skyMat.depthTest = false;
+skyScene.add(new THREE.Mesh(skyGeo, skyMat));
+const skyRT = new THREE.WebGLRenderTarget(1, 1, { depthBuffer: false, stencilBuffer: false });
+const skyShow = new THREE.Mesh(skyGeo, new THREE.ShaderMaterial({
+  side: THREE.BackSide, depthWrite: false,
+  uniforms: { skyTex: { value: skyRT.texture }, invBuf: { value: new THREE.Vector2(1, 1) } },
+  vertexShader: `void main(){ gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+  fragmentShader: `
+    precision highp float;
+    uniform sampler2D skyTex;
+    uniform vec2 invBuf;
+    void main(){ gl_FragColor = texture2D(skyTex, gl_FragCoord.xy * invBuf); }`
+}));
+skyShow.renderOrder = 1;     // after the opaque field, so it only fills the sky that shows
+scene.add(skyShow);
+const skyBuf = new THREE.Vector2();
+function sizeSky(){
+  renderer.getDrawingBufferSize(skyBuf);
+  skyRT.setSize(Math.max(1, Math.round(skyBuf.x*SKY_SCALE)), Math.max(1, Math.round(skyBuf.y*SKY_SCALE)));
+  skyShow.material.uniforms.invBuf.value.set(1/skyBuf.x, 1/skyBuf.y);
+}
+// angled and top look down too steeply to see any sky: skip painting it there.
+// the clouds drift slowly, so while the camera holds still they're repainted
+// every third frame; whenever it moves, every frame
+const skyFwd = new THREE.Vector3(), skyAt = new THREE.Vector3(1e9, 0, 0), skyLook = new THREE.Vector3();
+let skyTick = 0;
+function skyMoved(){
+  camera.getWorldDirection(skyFwd);
+  return skyAt.distanceToSquared(camera.position) > 1e-4 || skyFwd.dot(skyLook) < .999995;
+}
+function skyInView(){
+  camera.getWorldDirection(skyFwd);
+  return Math.asin(skyFwd.y) + camera.fov*Math.PI/360 > -.03;
+}
 
 /* ────────────────────────────────────────────────────────
    shaders
@@ -310,9 +736,9 @@ function terrainH(x, z){
        + 0.75*Math.sin(x*0.31 - 0.8)*Math.sin(z*0.27 + 2.1)
        + 0.85*Math.sin((x + z)*0.09 + 0.5);
 }
-function terrainNJS(x, z){
+function terrainNJS(x, z, out = new THREE.Vector3()){
   const e = 0.35;
-  return new THREE.Vector3(
+  return out.set(
     terrainH(x-e, z) - terrainH(x+e, z),
     2*e,
     terrainH(x, z-e) - terrainH(x, z+e)
@@ -330,33 +756,126 @@ const TERRAIN_GLSL = `
       terrainH(p - e.xy) - terrainH(p + e.xy),
       2.0*e.x,
       terrainH(p - e.yx) - terrainH(p + e.yx)));
+  }`;
+const SH_N = 160, SH_S = SPAN + 17;    // shadow-map texels, and the world half-extent it covers
+// the meadow ramp, root to tip and shade to sun: the dark depths between
+// blades, the shadows (about #244620 once graded), the body green near
+// #38912C, sunlit grass, and the golden-lime tips. five stops, so each
+// blade carries a long, smooth gradient and shade melts into light.
+// written out as a GLSL function, and baked into a 256-texel gradient the
+// grass reads with a single lookup per pixel
+const MEADOW_STOPS = [[0, '#0A2208'], [.3, '#1E421A'], [.55, '#419530'], [.8, '#72C144'], [1, '#B4CF5E']];
+const MEADOW_RGB = MEADOW_STOPS.map(([t, hex]) => [t, new THREE.Color(hex)]);
+const glVec = c => `vec3(${c.r.toFixed(3)}, ${c.g.toFixed(3)}, ${c.b.toFixed(3)})`;
+const MEADOW_GLSL = `vec3 meadow(float t){
+    vec3 c = ${glVec(MEADOW_RGB[0][1])};
+    ${MEADOW_RGB.slice(1).map(([t, c], i) => `c = mix(c, ${glVec(c)}, smoothstep(${MEADOW_RGB[i][0].toFixed(2)}, ${t.toFixed(2)}, t));`).join('\n    ')}
+    return c;
+  }`;
+const rampTex = (() => {
+  const d = new Uint8Array(256*4), ss = (a, b, v) => { const x = Math.min(1, Math.max(0, (v - a)/(b - a))); return x*x*(3 - 2*x); };
+  for (let i=0;i<256;i++){
+    const t = i/255, c = MEADOW_RGB[0][1].clone();
+    for (let k=1;k<MEADOW_RGB.length;k++) c.lerp(MEADOW_RGB[k][1], ss(MEADOW_RGB[k-1][0], MEADOW_RGB[k][0], t));
+    d[i*4] = Math.round(c.r*255); d[i*4+1] = Math.round(c.g*255); d[i*4+2] = Math.round(c.b*255); d[i*4+3] = 255;
   }
-  float slopeShade(vec2 p){
-    return clamp(0.72 + 0.38*dot(terrainN(p), normalize(vec3(0.45, 0.75, 0.30))), 0.58, 1.14);
+  const tex = new THREE.DataTexture(d, 256, 1, THREE.RGBAFormat);
+  tex.minFilter = tex.magFilter = THREE.LinearFilter;
+  tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
+  tex.needsUpdate = true;
+  return tex;
+})();
+const LIGHT_GLSL = GRADE_GLSL + `
+  ${MEADOW_GLSL}
+  // the distant hills sit cooler: #2D5E36 in shade, #4D8B54, #A4C551 in sun
+  vec3 hillTone(float t){
+    vec3 c = mix(vec3(0.150, 0.330, 0.190), vec3(0.302, 0.545, 0.329), smoothstep(0.0, 0.5, t));
+    return mix(c, vec3(0.690, 0.800, 0.330), smoothstep(0.5, 1.0, t));
+  }
+  // light for things that keep their own colour (petals, leaves): full sun is neutral
+  vec3 lightOf(float sun){ return vec3(0.62, 0.66, 0.70) + vec3(0.38, 0.34, 0.30) * sun; }`;
+// the air: the backdrop's haze stays light until far off; the meadow's own haze
+// eases into it past the meadow's edge, so the fringe and the hillside behind it
+// sit in the same air (MEADOW_HAZE_GLSL needs span, fogN and fogF uniforms)
+const HAZE_GLSL = `
+  float hillHaze(float depth){ return pow(smoothstep(40.0, 260.0, depth), 1.6) * 0.98; }`;   // clear nearby, gathering only far off
+const MEADOW_HAZE_GLSL = HAZE_GLSL + `
+  // 0 inside the meadow, rising to 1 out on the hillside past its edge
+  float meadowRim(vec2 xz){ return smoothstep(span - 1.0, span + 6.0, max(abs(xz.x), abs(xz.y))); }
+  float hazeAt(float depth, float rim){ return mix(smoothstep(fogN, fogF, depth), hillHaze(depth), rim); }`;
+const SHADOW_GLSL = `
+  uniform sampler2D shadowTex;
+  // 1 in full sun, 0 in shadow — the hills, baked once
+  float sunAt(vec2 xz){ return texture2D(shadowTex, xz / ${(2*SH_S).toFixed(1)} + 0.5).r; }`;
+// open, grass-covered ground seen from a distance — shared by the ground just past
+// the meadow and by the backdrop hills, so the two meet without a seam.
+// needs vn(), hillTone() and a sunDir uniform in scope
+const HILL_PAINT_GLSL = `
+  vec3 hillPaint(vec3 n, vec2 xz, float sun, float depth){
+    // light rolls gently round each curve into shade — no hard terminator
+    float lam = smoothstep(0.25, 0.95, 0.5 + 0.5 * dot(n, sunDir));
+    // with distance the air flattens light and shade toward one soft tone
+    lam = mix(lam, 0.62, smoothstep(30.0, 170.0, depth) * 0.55);
+    // cast shadows stay faint, the way open ground fills with skylight
+    lam *= 0.78 + 0.22 * sun;
+    // the cover varies in broad, feathered swathes rather than spots
+    float b = vn(xz * 0.03) * 0.55 + vn(xz * 0.09 + 7.0) * 0.3 + vn(xz * 0.27 + 3.0) * 0.15;
+    float shrub = smoothstep(0.42, 0.88, vn(xz * 0.11 + 3.0) * 0.7 + vn(xz * 0.37) * 0.3);
+    vec3 col = hillTone(clamp(0.1 + 0.85 * lam + (b - 0.5) * 0.3 - shrub * 0.14, 0.0, 1.0));
+    // shade on a clear day is filled by the sky: a little cooler and lighter, never just darker
+    return mix(col, col * vec3(0.94, 1.0, 1.1) + vec3(0.02, 0.035, 0.05), (1.0 - lam) * 0.55);
   }`;
 
 const grassVert = `
   attribute vec3  offset;   // per-instance root position
   attribute vec4  rnd;      // yaw, height scale, tint, phase
   attribute float aGrd;     // precomputed terrain height at the root
-  attribute float aShd;     // precomputed slope shade at the root
+  attribute float aShd;     // sun reaching the root: slope × cast shadow, baked
+  attribute float aLush;    // patches of denser, darker grass
   uniform sampler2D windTex;
   uniform sampler2D metaTex;
-  uniform float time, span, windAmp, heightScale;
+  uniform float time, span, windAmp, heightScale, bladeW, keep, lodNear, fogN, fogF;
   uniform vec2  windDir;
-  varying float vH, vWet, vBurn, vTint, vRand, vShade, vDepth;
+  uniform vec3  sunDir;
+  varying float vH, vWet, vBurn, vHeat, vCrush, vCut, vTint, vRand, vShade, vLush, vSun, vWave, vDepth, vSide, vRim, vHaze;
   varying vec2  vWorld;
+  ${MEADOW_HAZE_GLSL}
 
   void main(){
+    // a blade wholly outside the view (with a margin for its height and lean)
+    // skips all the work below and is parked beyond the far plane
+    vec4 rc = projectionMatrix * modelViewMatrix * vec4(offset.x, aGrd + 0.4, offset.z, 1.0);
+    if (rc.w < -1.5 || abs(rc.x) > rc.w + 1.4 * projectionMatrix[0][0]
+                    || abs(rc.y) > rc.w + 1.4 * projectionMatrix[1][1]
+                    || fract(rnd.w * 7.773) > keep){      // the emergency tiers thin the field evenly
+      gl_Position = vec4(0.0, 0.0, 2.0, 1.0);
+      return;
+    }
+    // distance detail: far off, blades are a pixel or two wide and pile up on
+    // screen, so fewer of them, a little wider, give the same texture. each
+    // blade shrinks away smoothly near its cutoff, so nothing pops as the camera moves
+    float lodKeep = clamp(1.0 - (distance(cameraPosition, vec3(offset.x, aGrd, offset.z)) - lodNear) / 26.0, 0.45, 1.0);
+    float lodU = fract(rnd.x * 1.59155);
+    float lodFade = clamp((lodKeep * 1.06 - lodU) / 0.06, 0.0, 1.0);   // 1 for every blade until thinning begins
+    if (lodFade <= 0.0){
+      gl_Position = vec4(0.0, 0.0, 2.0, 1.0);
+      return;
+    }
     vec2 fuv = (offset.xz + vec2(span)) / (2.0 * span);
     vec4 wo  = texture2D(windTex, fuv);
     vec4 mt  = texture2D(metaTex, fuv);
-    float cut = mt.r, wet = mt.g, burn = mt.b;
+    // past the meadow's edge (the decorative skirt) nothing is painted: ignore the textures
+    float inField = step(0.0, fuv.x) * step(fuv.x, 1.0) * step(0.0, fuv.y) * step(fuv.y, 1.0);
+    wo = mix(vec4(0.5, 0.0, 0.5, 1.0), wo, inField);
+    mt *= inField;
+    float cut = mt.r, wet = mt.g, burn = mt.b, heat = mt.a, crush = wo.g;
 
     vec3 p = position;
     float h = position.y;                       // 0..1 along the blade
-    p.x *= mix(0.55, 1.35, fract(rnd.z * 5.13));
-    p.y *= rnd.y * heightScale * (1.0 - cut * 0.93) * (1.0 - burn * 0.22);
+    float lodW = pow(1.0 / lodKeep, 0.6) * lodFade;
+    p.x *= mix(0.6, 1.2, fract(rnd.z * 5.13)) * bladeW * lodW;
+    p.y *= rnd.y * heightScale * (1.0 - cut * 0.93) * (1.0 - burn * 0.22) * (1.0 - crush * 0.16)
+         * mix(0.7, 1.0, lodFade);
 
     // cylindrical billboard: each blade turns to face the camera, with
     // per-blade jitter so the field doesn't collapse into parallel cards
@@ -374,10 +893,16 @@ const grassVert = `
                + sin(time*2.9 + rnd.w*1.7 + offset.x*0.35) * 0.4
                + flutter;
     float amp = windAmp * wo.a;
+    // rolling gusts: a slow wave travels downwind, laying the grass over as it passes
+    float wave = 0.5 + 0.5 * sin(dot(offset.xz, windDir) * 0.32 - time * 1.5 + sin(offset.x * 0.11) * 0.8);
+    float push = wave * wave * amp * 3.2;
+    vWave = wave * wo.a;
+    // blades in the flame shiver in the heat
+    float shiver = heat * h * 0.22 * sin(time*23.0 + rnd.w*11.0 + offset.x*5.0);
     float ax = 3.14159 * (wo.r - 0.5) * mix(0.75, 1.0, h)
-             + (windDir.x * sway * amp + (rnd.z - 0.5) * 0.42) * bendW;
+             + (windDir.x * (sway * amp + push) + (rnd.z - 0.5) * 0.42) * bendW + shiver;
     float az = 3.14159 * (wo.b - 0.5) * mix(0.75, 1.0, h)
-             + (windDir.y * sway * amp + (fract(rnd.z*7.31) - 0.5) * 0.42) * bendW;
+             + (windDir.y * (sway * amp + push) + (fract(rnd.z*7.31) - 0.5) * 0.42) * bendW + shiver * 0.7;
 
     float ca = cos(ax), sa = sin(ax);
     p = vec3(ca*p.x + sa*p.y, -sa*p.x + ca*p.y, p.z);
@@ -385,94 +910,243 @@ const grassVert = `
     p = vec3(p.x, cb*p.y - sb*p.z, sb*p.y + cb*p.z);
 
     vec3 world = p + vec3(offset.x, aGrd, offset.z);
+    // how directly this blade sits between the camera and the sun
+    vSun = pow(max(dot(normalize(world - cameraPosition), sunDir), 0.0), 3.0);
     vec4 mv = modelViewMatrix * vec4(world, 1.0);
 
-    vH = h; vWet = wet; vBurn = burn; vTint = rnd.z;
+    vH = h; vWet = wet; vBurn = burn; vHeat = heat; vCrush = crush; vCut = cut; vTint = rnd.z;
     vRand = fract(rnd.w * 1.11408);
     vShade = aShd;
+    vLush = aLush;
     vWorld = world.xz; vDepth = -mv.z;
+    vSide = sign(position.x);                   // -1 and 1 at the edges, 0 at the tip
+    // past the meadow's edge the fringe takes the hillside's colour and its lighter haze
+    vRim = meadowRim(world.xz);
+    vHaze = hazeAt(vDepth, vRim);
     gl_Position = projectionMatrix * mv;
   }`;
 
 const grassFrag = `
   precision highp float;
-  uniform vec3 colTop, colBot, colDry, colChar, fogCol;
-  uniform float fogN, fogF;
-  varying float vH, vWet, vBurn, vTint, vRand, vShade, vDepth;
+  uniform vec3 colChar, fogCol;
+  uniform float time;
+  uniform sampler2D rampTex;
+  varying float vH, vWet, vBurn, vHeat, vCrush, vCut, vTint, vRand, vShade, vLush, vSun, vWave, vDepth, vSide, vRim, vHaze;
   varying vec2  vWorld;
   float hash(vec2 q){ return fract(sin(dot(q, vec2(127.1, 311.7))) * 43758.5453); }
+  ${LIGHT_GLSL}
 
   void main(){
-    // dissolve as the blade burns (GDQuest-style, driven by the b channel)
-    float n = hash(floor(vWorld * 40.0) + floor(vH * 8.0));
-    if (n < vBurn * 1.15 - 0.12) discard;
+  #ifdef BURN
+    // dissolve as the blade burns, in a noisy pattern driven by the char
+    float n  = hash(floor(vWorld * 40.0) + floor(vH * 8.0));
+    float th = vBurn * 1.15 - 0.12;
+    if (n < th) discard;
+  #endif
 
-    // sun-dried patches shift the tips toward straw
-    vec3 top = mix(colTop, colDry, smoothstep(0.5, 0.95, vTint));
-    vec3 col = mix(colBot, top, vH);
-    col *= 0.82 + vRand * 0.32;
-    col *= vShade;
+    // the palette, picked by how much sun this part of the blade gets: roots
+    // sit in the grass's own shade, tips catch the light; lush patches run
+    // darker, sun-dried and regrowing ones a little brighter
+    float near = 1.0 - smoothstep(3.0, 13.0, vDepth);
+    float far  = smoothstep(8.0, 28.0, vDepth);
+    // this blade's own shade, about zero on average; about a third of the
+    // blades sit a little in their neighbours' shade
+    float own = (vRand - 0.5) * 0.3 - 0.12 * (1.0 - smoothstep(0.15, 0.45, vRand)) + 0.04;
+    float t = 0.09 + 0.32 * vShade + 0.55 * vH * mix(0.5, 1.0, vShade)
+            - near * (0.32 + 0.22 * (1.0 - vH)) + far * 0.18
+            + (vLush - 0.93) * 1.2 + smoothstep(0.5, 0.95, vTint) * 0.1 + vCut * 0.2
+            // toward its edges a blade eases to the tone around it, so neighbours
+            // blend into one another instead of cutting crisp outlines
+            + own * (1.0 - 0.45 * vSide * vSide);
+    vec3 col = texture2D(rampTex, vec2(clamp(t, 0.0, 1.0) * (255.0/256.0) + 0.5/256.0, 0.5)).rgb;   // = meadow(t)
+    col *= 1.0 + 0.07 * vWave;                // a soft sheen where the gust lays it over
+    col = mix(col, col * vec3(1.08, 1.0, 0.78), smoothstep(0.6, 0.95, vTint) * 0.4);   // a hint of straw
+    // the sunlight falls golden: the lit side of the field and the upper blades warm toward gold
+    float lit = smoothstep(0.45, 0.95, vShade) * smoothstep(0.3, 1.0, vH);
+    col = mix(col, col * vec3(1.18, 1.07, 0.70), lit * 0.5);
 
-    // wet: darker body, glossy tip
-    col *= 1.0 - vWet * 0.38;
-    col += vWet * pow(vH, 3.0) * vec3(0.20, 0.25, 0.27);
+    // trampled: blades lie in each other's shade and bruise toward olive
+    col *= 1.0 - vCrush * 0.34;
+    col *= mix(vec3(1.0), vec3(1.06, 0.96, 0.66), vCrush * 0.7);
 
-    // char + ember rim while mid-burn
-    col = mix(col, colChar, clamp(vBurn * 1.9, 0.0, 1.0));
-    float ember = smoothstep(0.03, 0.25, vBurn) * (1.0 - smoothstep(0.55, 0.95, vBurn));
-    col += ember * vec3(0.95, 0.34, 0.05) * (0.35 + 0.65 * hash(vWorld * 7.0));
+    // the rarer states only cost anything where they are
+    if (vWet > 0.002){
+      // wet: darker body, glossy tip
+      col *= 1.0 - vWet * 0.38;
+      col += vWet * vH * vH * vH * vec3(0.20, 0.25, 0.27);
+      // droplets: beads of water strung along the wet blades, about one slot
+      // in four on each blade holding one. they catch the light and twinkle as
+      // the blades sway, and dry off well before the darkness of the soak does
+      float k = vH * 5.0 + vRand * 13.0, slot = floor(k);
+      float has = step(0.74, fract(sin(slot * 12.9898 + vRand * 78.233) * 43758.5453));
+      float bead = has * (1.0 - smoothstep(0.18, 0.55, abs(fract(k) - 0.5) * 2.0))
+                 * (1.0 - 0.6 * vSide * vSide)                  // round: brightest down the middle of the blade
+                 * smoothstep(0.3, 0.7, vWet)                   // only while freshly soaked
+                 * (1.0 - smoothstep(14.0, 26.0, vDepth))       // far off they'd be specks of noise
+                 * step(0.1, vH);
+      if (bead > 0.001){
+        float twinkle = 0.6 + 0.4 * sin(time * 3.1 + slot * 7.3 + vRand * 21.0);
+        col = mix(col, vec3(0.80, 0.88, 0.90), bead * 0.45);                                 // clear water over the green
+        float core = smoothstep(0.5, 1.0, bead);                                             // the pinpoint of light in each bead
+        col += core * (0.4 + 0.5 * vSun) * twinkle * vec3(1.0, 0.99, 0.95);
+      }
+    }
+  #ifdef BURN
+    if (vBurn > 0.002 || vHeat > 0.002){
+      // char
+      col = mix(col, colChar, clamp(vBurn * 1.9, 0.0, 1.0));
+      // flame: hot blades glow, brightest along the dissolving edge
+      float edge  = 1.0 - smoothstep(0.0, 0.14, n - th);
+      float flick = 0.6 + 0.4 * hash(vWorld * 9.0 + floor(time * 14.0));
+      col += vHeat * (0.25 * vH + 0.9 * edge * step(0.02, vBurn)) * flick * vec3(1.0, 0.45, 0.10);
+    }
+  #endif
 
-    col = mix(col, fogCol, smoothstep(fogN, fogF, vDepth));
-    gl_FragColor = vec4(col, 1.0);
+    // backlight: facing the sun, blade tips glow through, warm and luminous
+    col += vSun * vH * vH * vec3(0.17, 0.14, 0.03) * (1.0 - vBurn) * smoothstep(0.15, 0.6, vShade);
+    // past the meadow's edge the fringe takes on the hillside's colour
+    if (vRim > 0.001) col = mix(col, hillTone(0.45 + 0.35 * vShade + 0.3 * vH), vRim * 0.85);
+    // distance fades into a warm glow on the sun side, cool blue elsewhere
+    col = mix(col, mix(fogCol, vec3(0.99, 0.95, 0.84), vSun * 0.4), vHaze);
+    gl_FragColor = vec4(grade(col), 1.0);
   }`;
 
 const groundVert = `
   uniform float span;
-  varying vec2 vWorld; varying float vDepth, vShade;
+  uniform vec3 sunDir;
+  varying vec2 vWorld; varying float vDepth, vShade, vSun;
+  varying vec3 vNrm;
   ${TERRAIN_GLSL}
   void main(){
     vec4 w  = modelMatrix * vec4(position, 1.0);
     w.y += terrainH(w.xz);
     vec4 mv = viewMatrix * w;
     vWorld = w.xz; vDepth = -mv.z;
-    vShade = slopeShade(w.xz);
+    vNrm = terrainN(w.xz);
+    vShade = clamp(0.25 + 0.85 * dot(vNrm, sunDir), 0.0, 1.0);   // slope facing the sun
+    vSun = pow(max(dot(normalize(w.xyz - cameraPosition), sunDir), 0.0), 3.0);
     gl_Position = projectionMatrix * mv;
   }`;
 
 const groundFrag = `
   precision highp float;
-  uniform sampler2D metaTex;
-  uniform float span;
-  uniform vec3 soil, grassBot, fresh, colChar, fogCol;
+  uniform sampler2D metaTex, windTex;
+  uniform float span, time;
+  uniform vec3 colChar, ash, fogCol, sunDir;
   uniform float fogN, fogF;
-  varying vec2 vWorld; varying float vDepth, vShade;
+  varying vec2 vWorld; varying float vDepth, vShade, vSun;
+  varying vec3 vNrm;
   float hash(vec2 q){ return fract(sin(dot(q, vec2(127.1, 311.7))) * 43758.5453); }
+  float vn(vec2 p){
+    vec2 i = floor(p), f = fract(p);
+    vec2 u = f*f*(3.0-2.0*f);
+    return mix(mix(hash(i), hash(i+vec2(1,0)), u.x),
+               mix(hash(i+vec2(0,1)), hash(i+vec2(1,1)), u.x), u.y);
+  }
+  ${LIGHT_GLSL}
+  ${SHADOW_GLSL}
+  ${HILL_PAINT_GLSL}
+  ${MEADOW_HAZE_GLSL}
   void main(){
     vec2 fuv = (vWorld + vec2(span)) / (2.0 * span);
     vec4 mt = texture2D(metaTex, fuv);
-    vec3 col = mix(soil, grassBot, 0.80);
-    col *= 0.94 + 0.10 * hash(floor(vWorld * 6.0));
-    col *= vShade;
-    col = mix(col, fresh, mt.r * 0.55);                      // grassless = fresh green land
+    float crush = texture2D(windTex, fuv).g;
+    float sunG = sunAt(vWorld) * vShade;
+    // under the blades the ground sits in their shade; mown (or regrowing
+    // after a burn), it opens to the light: a fresh, short green
+    vec3 col = meadow(0.05 + 0.3 * sunG) * (0.94 + 0.10 * hash(floor(vWorld * 6.0)));
+    col = mix(col, meadow(0.42 + 0.4 * sunG), mt.r * 0.75);
+    col *= 1.0 - crush * 0.24;                               // trodden path: pressed, shadowed earth
     col *= 1.0 - mt.g * 0.30;                                // wet is darker
-    col = mix(col, colChar, clamp(mt.b * 1.6, 0.0, 1.0));    // char
-    col = mix(col, fogCol, smoothstep(fogN, fogF, vDepth));
-    gl_FragColor = vec4(col, 1.0);
+
+    // burnt ground: mottled charcoal and grey ash, never pure black, paling
+    // to ash as it heals. then, before any blade grows back, the ash greens
+    // over — specks of new shoots first, filling into a soft young carpet
+    float c = mt.b;
+    float mott = vn(vWorld * 8.0) * 0.65 + hash(floor(vWorld * 28.0)) * 0.35;
+    vec3 charcoal = mix(colChar, ash, 0.22 + 0.5 * mott);
+    vec3 burnt = mix(ash, charcoal, smoothstep(0.30, 0.80, c));
+    float sprout = 1.0 - smoothstep(0.08, 0.40, c);            // 0 while it's char, 1 as the last of it goes
+    float specks = vn(vWorld * 7.0) * 0.55 + hash(floor(vWorld * 26.0)) * 0.45;
+    float shoots = smoothstep(specks * 0.75, specks * 0.75 + 0.3, sprout);
+    burnt = mix(burnt, col * vec3(1.0, 1.06, 0.9) * (0.95 + 0.1 * mott), shoots);   // the young green, a touch fresher
+    col = mix(col, burnt, smoothstep(0.0, 0.05, c));
+
+    // as the grass fringe thins out, the ground becomes the open hillside beyond
+    float beyond = smoothstep(span + 0.5, span + 3.5, max(abs(vWorld.x), abs(vWorld.y)));
+    col = mix(col, hillPaint(normalize(vNrm), vWorld, sunAt(vWorld), vDepth), beyond);
+
+    // smoulder: embers breathe in the char, scattered by noise
+    float hot = mt.a;
+    if (hot > 0.004){
+      float g = vn(vWorld * 5.0 + vec2(time * 0.8, -time * 0.55)) * 0.6
+              + vn(vWorld * 15.0 - vec2(time * 1.4)) * 0.4;
+      float spots = smoothstep(0.66 - hot * 0.5, 0.92 - hot * 0.3, g);
+      vec3 ember = mix(vec3(0.55, 0.07, 0.02), vec3(1.0, 0.58, 0.16), hot * hot);
+      col += ember * hot * (0.25 + 1.1 * spots);
+    }
+
+    col = mix(col, mix(fogCol, vec3(0.99, 0.95, 0.84), vSun * 0.4), hazeAt(vDepth, meadowRim(vWorld)));
+    gl_FragColor = vec4(grade(col), 1.0);
   }`;
+
+/* ────────────────────────────────────────────────────────
+   sun & shadows — the hills around the meadow cast soft shadows,
+   marched toward the sun once at load and baked into
+   a texture (and into each blade's light)
+──────────────────────────────────────────────────────── */
+// how much sun reaches a point: march toward it, keeping how narrowly
+// the ray clears the hills — that ratio is the soft penumbra
+function terrainSun(x, z, h0){
+  const L = SUN_U.value;
+  let res = 1, t = .3;
+  while (t < 40){
+    const y = h0 + L.y*t;
+    if (y > 3.3) break;                                  // above every hilltop: clear
+    res = Math.min(res, 5*(y - terrainH(x + L.x*t, z + L.z*t))/t);
+    if (res <= 0) return 0;
+    t += .3 + t*.07;
+  }
+  return res;
+}
+
+const shadowData = new Uint8Array(SH_N*SH_N*4);
+const sunGrid = new Float32Array(SH_N*SH_N);
+{
+  for (let j=0;j<SH_N;j++) for (let i=0;i<SH_N;i++){
+    const x = -SH_S + (i + .5)/SH_N*2*SH_S, z = -SH_S + (j + .5)/SH_N*2*SH_S;
+    let s = terrainSun(x, z, terrainH(x, z) + .12);
+    s = s*s*(3 - 2*s);
+    sunGrid[j*SH_N + i] = s;
+    const o = (j*SH_N + i)*4;
+    shadowData[o] = shadowData[o+1] = shadowData[o+2] = Math.round(s*255);
+    shadowData[o+3] = 255;
+  }
+}
+const shadowTex = new THREE.DataTexture(shadowData, SH_N, SH_N, THREE.RGBAFormat);
+shadowTex.minFilter = shadowTex.magFilter = THREE.LinearFilter;
+shadowTex.wrapS = shadowTex.wrapT = THREE.ClampToEdgeWrapping;
+shadowTex.needsUpdate = true;
+// the same lookup on the cpu, for baking each blade's light
+function sunAtJS(x, z){
+  const fx = (x + SH_S)/(2*SH_S)*SH_N - .5, fz = (z + SH_S)/(2*SH_S)*SH_N - .5;
+  const i = Math.max(0, Math.min(SH_N - 2, Math.floor(fx))), j = Math.max(0, Math.min(SH_N - 2, Math.floor(fz)));
+  const u = Math.min(1, Math.max(0, fx - i)), v = Math.min(1, Math.max(0, fz - j)), g = sunGrid, n = SH_N;
+  return (g[j*n + i]*(1 - u) + g[j*n + i + 1]*u)*(1 - v) + (g[(j + 1)*n + i]*(1 - u) + g[(j + 1)*n + i + 1]*u)*v;
+}
 
 /* ────────────────────────────────────────────────────────
    ground
 ──────────────────────────────────────────────────────── */
 const ground = new THREE.Mesh(
-  new THREE.PlaneGeometry(SPAN*2 + 34, SPAN*2 + 34, 140, 140),
+  new THREE.PlaneGeometry(SPAN*2 + 8, SPAN*2 + 8, 110, 110),
   new THREE.ShaderMaterial({
     vertexShader: groundVert, fragmentShader: groundFrag,
     uniforms:{
-      metaTex:{value: meta.tex}, span:{value: SPAN},
-      soil:{value: new THREE.Color('#4c4a2e')},
-      grassBot:{value: new THREE.Color('#2c6e1a')},
-      fresh:{value: new THREE.Color('#7cb944')},
-      colChar:{value: new THREE.Color('#191512')},
+      metaTex:{value: meta.tex}, windTex:{value: wind.tex}, span:{value: SPAN}, time: TIME, sunDir: SUN_U,
+      shadowTex:{value: shadowTex},
+      colChar:{value: new THREE.Color('#2a2622')},
+      ash:{value: new THREE.Color('#7a756b')},
       fogCol:{value: FOG},
       fogN: FOGN, fogF: FOGF,
     }
@@ -482,13 +1156,111 @@ ground.rotation.x = -Math.PI/2;
 scene.add(ground);
 
 /* ────────────────────────────────────────────────────────
+   backdrop — the hills beyond the meadow, painted rather than rendered:
+   a prominent hill behind the field, shoulders either side, a paler
+   range further back, each layer fading into the haze
+──────────────────────────────────────────────────────── */
+// how far the land beyond the meadow drops (it starts at the ground plane's edge, r = 18)
+const LAND_FALL = 3.0;
+// fringe blades out past r = 18 stand on that falling land, not on the meadow's terrain.
+// (they stop short of r = 22, so the backdrop's hills never come into it)
+function landFall(x, z){
+  const r = Math.max(Math.abs(x), Math.abs(z)), t = clamp((r - 18)/14, 0, 1);
+  return LAND_FALL * t*t*(3 - 2*t);
+}
+const BACKDROP_GLSL = `
+  float g2(vec2 p, vec2 c, vec2 r, float h){ vec2 d = (p - c) / r; return h * exp(-dot(d, d)); }
+  float hills(vec2 p){
+    return g2(p, vec2(4.0, -72.0),   vec2(36.0, 22.0), 2.1)      // the low swell behind the field
+         + g2(p, vec2(-60.0, -48.0), vec2(34.0, 22.0), 0.7)      // gentle shoulders either side
+         + g2(p, vec2(58.0, -52.0),  vec2(30.0, 20.0), 0.9)
+         + g2(p, vec2(-100.0, -205.0), vec2(95.0, 34.0), 1.6)   // far, hazy ranges, well out toward the horizon
+         + g2(p, vec2(110.0, -220.0), vec2(85.0, 32.0), 1.3)
+         + 0.3 * sin(p.x * 0.05) * sin(p.y * 0.06 + 1.3);
+  }
+  // the meadow's own terrain near the middle (tucked just under the ground
+  // plane), easing into the backdrop's hills further out
+  float groundAt(vec2 p){
+    float r = max(abs(p.x), abs(p.y));
+    float t = terrainH(p);
+    float sink = 0.3 * (1.0 - smoothstep(16.5, 18.0, r));    // hidden under the ground plane, level at its edge
+    // the land drops away from the ground plane's edge into a low valley, so the
+    // meadow stands as a hill; far off the country climbs again until its last
+    // ranges sit right on the horizon, where the haze dissolves them into the sky
+    float fall = ${LAND_FALL.toFixed(1)} * smoothstep(18.0, 32.0, r) + 3.0 * smoothstep(30.0, 70.0, r)
+               - 7.0 * smoothstep(130.0, 240.0, r);
+    return t - sink + smoothstep(22.0, 40.0, r) * (hills(p) - 0.5 * t) - fall;
+  }`;
+const backdrop = new THREE.Mesh(
+  new THREE.PlaneGeometry(420, 360, 220, 190),
+  new THREE.ShaderMaterial({
+    uniforms:{ sunDir: SUN_U, fogCol:{value: FOG}, fogN: FOGN, fogF: FOGF, shadowTex:{value: shadowTex} },
+    vertexShader:`
+      varying vec3 vPos, vN;
+      varying float vDepth;
+      ${TERRAIN_GLSL}
+      ${BACKDROP_GLSL}
+      void main(){
+        vec4 w = modelMatrix * vec4(position, 1.0);
+        w.y = groundAt(w.xz);
+        vec2 e = vec2(1.2, 0.0);
+        vN = normalize(vec3(groundAt(w.xz - e.xy) - groundAt(w.xz + e.xy), 2.0 * e.x,
+                            groundAt(w.xz - e.yx) - groundAt(w.xz + e.yx)));
+        vPos = w.xyz;
+        vec4 mv = viewMatrix * w;
+        vDepth = -mv.z;
+        gl_Position = projectionMatrix * mv;
+      }`,
+    fragmentShader:`
+      precision highp float;
+      uniform vec3 sunDir, fogCol;
+      uniform float fogN, fogF;
+      varying vec3 vPos, vN;
+      varying float vDepth;
+      ${SHADOW_GLSL}
+      ${LIGHT_GLSL}
+      float hash(vec2 q){ return fract(sin(dot(q, vec2(127.1, 311.7))) * 43758.5453); }
+      float vn(vec2 p){
+        vec2 i = floor(p), f = fract(p);
+        vec2 u = f*f*(3.0-2.0*f);
+        return mix(mix(hash(i), hash(i+vec2(1,0)), u.x),
+                   mix(hash(i+vec2(0,1)), hash(i+vec2(1,1)), u.x), u.y);
+      }
+      ${HILL_PAINT_GLSL}
+      ${HAZE_GLSL}
+      ${HORIZON_GLSL}
+      void main(){
+        vec3 n = normalize(vN);
+        // near the meadow, its baked hill shadows (faded out toward the map's edge)
+        float inMap = 1.0 - smoothstep(${(SH_S - 4).toFixed(1)}, ${(SH_S - 1).toFixed(1)}, max(abs(vPos.x), abs(vPos.z)));
+        vec3 col = hillPaint(n, vPos.xz, mix(1.0, sunAt(vPos.xz), inMap), vDepth);
+        // atmosphere: every range further back sits paler and bluer, the nearer
+        // ones in the meadow's haze, the farthest in the horizon's own colour
+        vec3 horizon = horizonAt(vPos - cameraPosition);
+        vec3 air = mix(fogCol, horizon, smoothstep(120.0, 240.0, vDepth));
+        col = mix(col, air, hillHaze(vDepth));
+        // the very rim of the land melts into the sky, so it never shows as an edge
+        float rim = max(smoothstep(-205.0, -245.0, vPos.z), smoothstep(170.0, 205.0, abs(vPos.x)));
+        col = mix(col, horizon, rim);
+        gl_FragColor = vec4(grade(col), 1.0);
+      }`
+  })
+);
+backdrop.rotation.x = -Math.PI/2;
+backdrop.position.z = -70;     // spans z from -250 (the far ranges) to 110
+backdrop.frustumCulled = false;
+scene.add(backdrop);
+
+
+/* ────────────────────────────────────────────────────────
    grass — one InstancedBufferGeometry for every blade
 ──────────────────────────────────────────────────────── */
-function bladeGeometry(){
-  const ROWS = 4, HW = IS_MOBILE ? 0.026 : 0.033;
+// ROWS segments up the blade: 4 up close, fewer far off where the curve is a few pixels
+function bladeGeometry(ROWS){
+  const HW = IS_MOBILE ? 0.015 : 0.017;
   const pos = [], idx = [];
   for (let i=0;i<ROWS;i++){
-    const y = i/ROWS, w = HW * Math.pow(1-y, .8);
+    const y = i/ROWS, w = HW * Math.pow(1-y, 1.15);   // tapers to a fine point
     pos.push(-w, y, 0,  w, y, 0);
   }
   pos.push(0, 1, 0); // tip
@@ -504,30 +1276,19 @@ function bladeGeometry(){
   return g;
 }
 
-const base = bladeGeometry();
-const geo  = new THREE.InstancedBufferGeometry();
-geo.index = base.index;
-geo.setAttribute('position', base.getAttribute('position'));
+const BLADE_SHAPES = [bladeGeometry(4), bladeGeometry(3), bladeGeometry(2)];
 
-const offsets = new Float32Array(BLADES*3);
-const rnds    = new Float32Array(BLADES*4);
-const grounds = new Float32Array(BLADES);   // terrain height per blade
-const shades  = new Float32Array(BLADES);   // slope shade per blade
-const SUN = new THREE.Vector3(0.45, 0.75, 0.30).normalize();
+const offsets = new Float32Array(MAX_BLADES*3);
+const rnds    = new Float32Array(MAX_BLADES*4);
+const grounds = new Float32Array(MAX_BLADES);   // terrain height per blade
+const shades  = new Float32Array(MAX_BLADES);   // slope shade per blade
+const SUN = SUN_U.value, nrm = new THREE.Vector3();   // a scratch normal for the loop below
+const lush    = new Float32Array(MAX_BLADES);   // denser, darker patches
 
-// smooth value noise for patchy height / dryness across the field
-function vnoise(x, z){
-  const xi = Math.floor(x), zi = Math.floor(z);
-  const xf = x-xi, zf = z-zi;
-  const h  = (a,b)=>{ const s = Math.sin(a*127.1 + b*311.7)*43758.5453; return s - Math.floor(s); };
-  const u  = xf*xf*(3-2*xf), v = zf*zf*(3-2*zf);
-  return h(xi,zi)*(1-u)*(1-v) + h(xi+1,zi)*u*(1-v)
-       + h(xi,zi+1)*(1-u)*v   + h(xi+1,zi+1)*u*v;
-}
-
-// grass grows in tufts: most blades cluster, the rest fill in between
+// grass grows in tufts: most blades cluster, the rest fill in between.
+// (the buffer is reordered afterwards — see the note below the loop)
 const clusters = [];
-for (let i=0;i<Math.floor(BLADES/14);i++){
+for (let i=0;i<Math.floor(MAX_BLADES/14);i++){
   clusters.push({
     x:(Math.random()*2-1)*(SPAN-.3),
     z:(Math.random()*2-1)*(SPAN-.3),
@@ -535,13 +1296,26 @@ for (let i=0;i<Math.floor(BLADES/14);i++){
   });
 }
 const clamp = (v,a,b)=>Math.min(b, Math.max(a, v));
-for (let i=0;i<BLADES;i++){
-  let x, z;
-  if (i % 25 < 7){
-    // foreground reserve: ~28% of blades fill the band nearest the scenic
-    // camera, where magnification makes any gap read as a bald patch
+const SKIRT_W = 8;      // how far past the meadow's edge the grass keeps going
+for (let i=0;i<MAX_BLADES;i++){
+  let x, z, skirt = 0;
+  if (i % 8 === 7){
+    // skirt: every eighth blade grows just past the edge, about as dense as
+    // the meadow right against it and thinning out within a stride or two.
+    // seen from the side the field ends softly, and from above there's no
+    // hard line where it stops; the hillside beyond stays clean
+    const d = Math.min(SKIRT_W, -Math.log(1 - Math.random()));
+    // (starting where the meadow's own blades stop, at SPAN - .15, so no seam of bare ground shows)
+    const side = (Math.random()*4)|0, along = (Math.random()*2 - 1)*(SPAN + d), out = SPAN - .15 + d;
+    x = side === 0 ? out : side === 1 ? -out : along;
+    z = side === 2 ? out : side === 3 ? -out : along;
+    skirt = clamp(d/SKIRT_W + (vnoise(x*.3 + 4.4, z*.3 + 1.9) - .5)*.6, 0, 1);
+  } else if (i % 25 < 7){
+    // foreground reserve: ~28% of blades thicken the field toward the scenic
+    // camera, where magnification makes any gap read as a bald patch. their
+    // density ramps up smoothly from mid-field, so there's no line where it starts
     x = (Math.random()*2-1)*(SPAN-.15);
-    z = 1.5 + Math.random()*(SPAN-1.65);
+    z = -6 + (SPAN + 5.85)*Math.sqrt(Math.random());
   } else if (Math.random() < .55){
     const c = clusters[(Math.random()*clusters.length)|0];
     const ang = Math.random()*Math.PI*2, r = Math.sqrt(Math.random())*c.r;
@@ -554,90 +1328,216 @@ for (let i=0;i<BLADES;i++){
   const hPatch = .7 + .6*vnoise(x*.22, z*.22);            // taller / shorter regions
   const dry    = vnoise(x*.28 + 13.1, z*.28 + 7.7);       // sun-dried patches
 
-  // ragged fringe: grass thins out toward the field edge, and the fringe
-  // width itself wobbles with noise so the boundary never reads as a square
-  const edge   = Math.min(SPAN - Math.abs(x), SPAN - Math.abs(z));
-  const fringe = clamp(edge / (1.4 + 1.8*vnoise(x*.6 + 3.3, z*.6 + 9.1)), 0, 1);
+  // the meadow runs full height right to its edge; the skirt beyond it shortens as it thins
+  const fringe = 1 - skirt;
 
   offsets[i*3]   = x;
   offsets[i*3+1] = 0;
   offsets[i*3+2] = z;
   rnds[i*4]   = Math.random()*Math.PI*2;                             // yaw
   rnds[i*4+1] = clamp((.32 + Math.random()*.32)*hPatch, .24, .80)
-              * (.3 + .7*fringe);                                    // height
+              * (.25 + .75*Math.pow(fringe, .7));                    // height
   rnds[i*4+2] = clamp(dry*.85 + Math.random()*.3 - .08, 0, 1);       // dryness/tint
   rnds[i*4+3] = Math.random()*Math.PI*2;                             // phase
-  grounds[i] = terrainH(x, z);
-  shades[i]  = Math.min(1.14, Math.max(0.58, 0.72 + 0.38*terrainNJS(x, z).dot(SUN)));
+  grounds[i] = terrainH(x, z) - landFall(x, z);
+  // sun reaching this blade: how squarely its slope faces the light, times any cast shadow
+  shades[i]  = sunAtJS(x, z) * Math.min(1, Math.max(0, .35 + .75*terrainNJS(x, z, nrm).dot(SUN)));
+  lush[i]    = .8 + .26*vnoise(x*.42 + 5.1, z*.42 + 2.7);
 }
-geo.setAttribute('offset', new THREE.InstancedBufferAttribute(offsets, 3));
-geo.setAttribute('rnd',    new THREE.InstancedBufferAttribute(rnds, 4));
-geo.setAttribute('aGrd',   new THREE.InstancedBufferAttribute(grounds, 1));
-geo.setAttribute('aShd',   new THREE.InstancedBufferAttribute(shades, 1));
+// buffer order, for the gpu: tile by tile, starting from the camera's side
+// of the field. blades drawn front to back let the gpu skip every pixel
+// already covered by nearer grass, and blades that sit together in the
+// buffer sit together on screen, so the vertex shader skips off-screen ones
+// in whole runs. (thinning, when it's ever needed, happens in the shader.)
+// a counting sort keeps load time flat
+const TILE = 1.5, TN = Math.ceil((SPAN + SKIRT_W)*2/TILE) + 1;
+// (the positions come in as an argument, so no closure keeps the unsorted copy alive)
+const bladeOrder = (pos => {
+  const key = new Uint32Array(MAX_BLADES), start = new Uint32Array(TN*TN + 1);
+  const tileOf = v => Math.min(TN - 1, Math.max(0, Math.floor((v + SPAN + SKIRT_W)/TILE)));
+  for (let i=0;i<MAX_BLADES;i++){
+    const k = (TN - 1 - tileOf(pos[i*3 + 2]))*TN + tileOf(pos[i*3]);   // nearest rows first
+    key[i] = k; start[k + 1]++;
+  }
+  for (let k=1;k<start.length;k++) start[k] += start[k - 1];
+  const order = new Uint32Array(MAX_BLADES);
+  for (let i=0;i<MAX_BLADES;i++) order[start[key[i]]++] = i;
+  return order;
+})(offsets);
+function inBladeOrder(a, n){
+  const out = new Float32Array(a.length);
+  for (let j=0;j<MAX_BLADES;j++){ const i = bladeOrder[j]*n; for (let c=0;c<n;c++) out[j*n + c] = a[i + c]; }
+  return out;
+}
+// the sorted buffer runs from the camera's side of the field to the back, so
+// it splits cleanly into near, middle and far stretches, each drawn with a
+// blade of its own detail: 4 segments up close, 3 past z = 2, 2 past z = -5.
+// (from straight above nothing is far, so top view gives them all 4)
+const bladeData = { offset:[inBladeOrder(offsets, 3), 3], rnd:[inBladeOrder(rnds, 4), 4],
+  aGrd:[inBladeOrder(grounds, 1), 1], aShd:[inBladeOrder(shades, 1), 1], aLush:[inBladeOrder(lush, 1), 1] };
+// rows are sorted nearest first, so the first blade in a row behind z marks the split
+const rowOf = z => Math.floor((z + SPAN + SKIRT_W)/TILE);
+const firstBehind = z => { const o = bladeData.offset[0], r = rowOf(z); let j = 0; while (j < MAX_BLADES && rowOf(o[j*3 + 2]) >= r) j++; return j; };
+const SPLITS = [0, firstBehind(2), firstBehind(-5), MAX_BLADES];
+const bladeGeos = BLADE_SHAPES.map((shape, lvl) => {
+  const g = new THREE.InstancedBufferGeometry();
+  g.index = shape.index;
+  g.setAttribute('position', shape.getAttribute('position'));
+  const a = SPLITS[lvl], b = SPLITS[lvl + 1];
+  for (const [name, [arr, n]] of Object.entries(bladeData))
+    g.setAttribute(name, new THREE.InstancedBufferAttribute(arr.subarray(a*n, b*n), n));
+  g.instanceCount = b - a;
+  return g;
+});
+function setBladeDetail(full){
+  bladeGeos.forEach((g, lvl) => {
+    const shape = BLADE_SHAPES[full ? 0 : lvl];
+    if (g.index === shape.index) return;
+    g.setIndex(shape.index);
+    g.setAttribute('position', shape.getAttribute('position'));
+  });
+}
 
 const grassMat = new THREE.ShaderMaterial({
   vertexShader: grassVert, fragmentShader: grassFrag,
   side: THREE.DoubleSide,
   uniforms:{
     windTex:{value: wind.tex}, metaTex:{value: meta.tex},
-    time:{value:0}, span:{value:SPAN},
-    windAmp:{value:.1}, windDir:{value:new THREE.Vector2(.9,.4)},
-    heightScale:{value:1.0},
-    colTop:{value:new THREE.Color('#7ecb40')},
-    colBot:{value:new THREE.Color('#276a17')},
-    colDry:{value:new THREE.Color('#bccf58')},
-    colChar:{value:new THREE.Color('#191512')},
+    time: TIME, span:{value:SPAN}, sunDir: SUN_U,
+    windAmp:{value:.1}, windDir:{value:new THREE.Vector2(.88,.38).normalize()},
+    heightScale:{value:1.0}, bladeW:{value:1.0}, keep:{value:1.01}, lodNear:{value:11},
+    colChar:{value:new THREE.Color('#3a3530')},   // charred blades: greyed, not black
+    rampTex:{value: rampTex},
     fogCol:{value:FOG},
     fogN: FOGN, fogF: FOGF,
   }
 });
-const grass = new THREE.Mesh(geo, grassMat);
-grass.frustumCulled = false;
-scene.add(grass);
+// the burn dissolve needs `discard`, and a shader that can discard stops the
+// gpu from skipping grass hidden behind nearer grass. so the field normally
+// draws with a variant that never discards, and swaps to the dissolving one
+// (same uniforms) only while some of it is actually burnt
+const grassMatBurn = new THREE.ShaderMaterial({
+  vertexShader: grassVert, fragmentShader: grassFrag, side: THREE.DoubleSide,
+  uniforms: grassMat.uniforms, defines: { BURN: 1 },
+});
+// near, then middle, then far: added in that order so they draw front to back
+const grassMeshes = bladeGeos.map(g => {
+  const m = new THREE.Mesh(g, grassMat);
+  m.frustumCulled = false;
+  scene.add(m);
+  return m;
+});
+let grassBurnOn = false;
+function setGrassBurn(on){
+  if (on === grassBurnOn) return;
+  grassBurnOn = on;
+  for (const m of grassMeshes) m.material = on ? grassMatBurn : grassMat;
+}
 
 /* ────────────────────────────────────────────────────────
-   wildflowers — points that live and die with the metadata
+   wildflowers — three kinds growing in drifts, drawn as
+   procedural point sprites that live and die with the metadata
 ──────────────────────────────────────────────────────── */
-const FLOWERS = innerWidth > 900 ? 900 : 380;
-const fPos = new Float32Array(FLOWERS*3);
+// share of the meadow, stem height range, drift scale, and how patchy each kind grows
+const FLOWER_KINDS = [
+  { share:.74, h:[.50,.68], patch:.14, gate:.44 },   // 0 white umbels: flat lace clusters, in drifts
+  { share:.14, h:[.46,.64], patch:.10, gate:.36 },   // 1 small yellow buttercups, few
+  { share:.12, h:[.40,.52], patch:.22, gate:.50 },   // 2 tiny white stars
+];
+const FLOWERS = innerWidth > 900 ? 1300 : 570;
+const fPos   = new Float32Array(FLOWERS*3);
 const fPhase = new Float32Array(FLOWERS);
+const fKind  = new Float32Array(FLOWERS);
+const fSeed  = new Float32Array(FLOWERS);
+function pickKind(){
+  let r = Math.random();
+  for (let k=0;k<FLOWER_KINDS.length;k++){ r -= FLOWER_KINDS[k].share; if (r <= 0) return k; }
+  return 0;
+}
+// how squarely a spot sits in the scenic view's frame: 1 inside, easing to 0
+// past its edges. away from that view the meadow is only lightly sprinkled
+const scenicSight = (() => {
+  const cam = new THREE.PerspectiveCamera(46, Math.max(innerWidth/innerHeight, 1.5), .1, 260);
+  cam.position.set(0, 4.1, 15.6); cam.lookAt(0, 1.6, 0);   // the scenic pose, see VIEWS
+  cam.updateMatrixWorld();
+  const v = new THREE.Vector3();
+  return (x, z) => {
+    v.set(x, terrainH(x, z) + .5, z).project(cam);
+    return v.z > 1 ? 0 : clamp((1.1 - Math.max(Math.abs(v.x), Math.abs(v.y)))/.3, 0, 1);
+  };
+})();
+let lastUmbel = null;
 for (let i=0;i<FLOWERS;i++){
-  const x = (Math.random()*2-1)*(SPAN-1.4);
-  const z = (Math.random()*2-1)*(SPAN-1.4);
+  const k = pickKind(), K = FLOWER_KINDS[k];
+  let x = 0, z = 0;
+  if (k === 0 && lastUmbel && Math.random() < .35){
+    // umbels often stand in twos and threes
+    const ang = Math.random()*Math.PI*2, r = .2 + Math.random()*.6;
+    x = clamp(lastUmbel[0] + Math.cos(ang)*r, -SPAN+1.2, SPAN-1.2);
+    z = clamp(lastUmbel[1] + Math.sin(ang)*r, -SPAN+1.2, SPAN-1.2);
+  } else {
+    // each kind leans toward its own drifts, with strays everywhere between,
+    // and thins right out where the scenic view never looks
+    for (let tries=0; tries<24; tries++){
+      x = (Math.random()*2-1)*(SPAN-1.2);
+      z = (Math.random()*2-1)*(SPAN-1.2);
+      const n = vnoise(x*K.patch + k*13.7, z*K.patch + k*7.3);
+      const drift = .3 + .7*clamp((n - K.gate)/.22, 0, 1);
+      if (Math.random() < drift*(.22 + .78*scenicSight(x, z))) break;
+    }
+  }
+  // a share of the umbels crowd the foreground the scenic view looks across
+  if (k === 0 && i % 7 === 0){
+    for (let tries=0; tries<12; tries++){
+      x = (Math.random()*2 - 1)*(SPAN - 1.5); z = 1 + Math.random()*9;
+      if (scenicSight(x, z) > .6) break;
+    }
+  }
+  if (k === 0) lastUmbel = [x, z];
   fPos[i*3]   = x;
-  fPos[i*3+1] = Math.min(.78, (.44 + Math.random()*.10) * (.7 + .6*vnoise(x*.22, z*.22)));
+  fPos[i*3+1] = Math.min(1.0, (K.h[0] + Math.random()*(K.h[1]-K.h[0])) * (.8 + .4*vnoise(x*.22, z*.22)));
   fPos[i*3+2] = z;
-  fPhase[i]   = Math.random();
+  fPhase[i] = Math.random();
+  fKind[i]  = k;
+  fSeed[i]  = Math.random();
 }
 const fGeo = new THREE.BufferGeometry();
 fGeo.setAttribute('position', new THREE.BufferAttribute(fPos, 3));
 fGeo.setAttribute('aPhase',   new THREE.BufferAttribute(fPhase, 1));
+fGeo.setAttribute('aKind',    new THREE.BufferAttribute(fKind, 1));
+fGeo.setAttribute('aSeed',    new THREE.BufferAttribute(fSeed, 1));
 const flowerMat = new THREE.ShaderMaterial({
   transparent: true, depthWrite: false,
   uniforms:{
     metaTex:{value: meta.tex}, windTex:{value: wind.tex}, span:{value: SPAN},
-    pr:{value: Math.min(devicePixelRatio, 2)},
+    pxScale: PXSCALE, shadowTex:{value: shadowTex},
+    headScale:{value: 1},   // the frame loop enlarges heads in top view, where the camera is far
     // share the live uniform objects with the grass so wind stays in sync
-    time: grassMat.uniforms.time,
+    time: TIME,
     windAmp: grassMat.uniforms.windAmp,
     windDir: grassMat.uniforms.windDir,
     heightScale: grassMat.uniforms.heightScale,
     fogN: FOGN, fogF: FOGF,
   },
   vertexShader:`
-    attribute float aPhase;
+    attribute float aPhase, aKind, aSeed;
     uniform sampler2D metaTex;
     uniform sampler2D windTex;
-    uniform float span, time, pr, windAmp, heightScale;
+    uniform float span, time, pxScale, headScale, windAmp, heightScale;
     uniform vec2 windDir;
-    varying float vLife, vDepth, vPhase;
+    varying float vLife, vDepth, vKind, vSeed, vTilt, vPx, vShade;
     ${TERRAIN_GLSL}
+    ${SHADOW_GLSL}
     void main(){
       vec2 fuv = (position.xz + vec2(span)) / (2.0*span);
       vec4 mt  = texture2D(metaTex, fuv);
       vec4 wo  = texture2D(windTex, fuv);
-      vLife = (1.0 - mt.r) * (1.0 - mt.b);
-      vPhase = aPhase;
+      // after a cut or a burn a flower comes back in two steps: the stem
+      // grows to its full height first, and only then does the head open
+      float grow = (1.0 - mt.r) * (1.0 - mt.b);
+      float stemUp = smoothstep(0.0, 0.6, grow);
+      float bloom = smoothstep(0.55, 1.0, grow);
+      vLife = bloom;
 
       vec3 p = position;
       p.y *= heightScale;
@@ -655,25 +1555,72 @@ const flowerMat = new THREE.ShaderMaterial({
       p.x += windDir.x * sway * stem * 1.6;
       p.z += windDir.y * sway * stem * 1.6;
 
-      p.y *= 1.0 - mt.r*0.8;
+      p.y *= mix(0.2, 1.0, stemUp);
       p.y += terrainH(position.xz);
       vec4 mv = modelViewMatrix * vec4(p, 1.0);
       vDepth = -mv.z;
-      gl_PointSize = pr * clamp(110.0/vDepth, 1.0, 9.0) * vLife;
+
+      // head size in world units, by kind, so flowers shrink properly with
+      // distance; an opening bud starts small and unfurls to full size
+      float size = aKind < 0.5 ? 0.11 : aKind < 1.5 ? 0.06 : 0.045;
+      vPx = size * headScale * (0.8 + 0.4 * aSeed) * pxScale / vDepth * mix(0.35, 1.0, bloom);
+      // a flower faces the sky: how squarely the camera looks down on it
+      vTilt = clamp(abs(normalize(cameraPosition - p).y) * 1.2, 0.45, 1.0);
+      vKind = aKind; vSeed = aSeed;
+      vShade = sunAt(position.xz);
+      gl_PointSize = bloom > 0.02 ? clamp(vPx, 1.0, 64.0) : 0.0;
       gl_Position = projectionMatrix * mv;
     }`,
   fragmentShader:`
     precision highp float;
     uniform float fogN, fogF;
-    varying float vLife, vDepth, vPhase;
+    varying float vLife, vDepth, vKind, vSeed, vTilt, vPx, vShade;
+    ${LIGHT_GLSL}
     void main(){
-      float d = length(gl_PointCoord - 0.5);
-      float alpha = smoothstep(0.5, 0.28, d) * vLife;
+      vec2 q = (gl_PointCoord - 0.5) * 2.0;     // -1..1 across the sprite
+      q.y = -q.y / vTilt;                        // seen from low down, the face is an ellipse
+      float r = length(q);
+      if (r > 1.0) discard;
+      float a  = atan(q.y, q.x) + vSeed * 6.2832;
+      float aa = 2.4 / max(vPx, 1.0);           // about a pixel of edge softness
+      vec3 col; float m;
+
+      if (vKind < 0.5){
+        // umbel: a flat-topped lace of tiny florets, held up above the
+        // grass the way yarrow and cow parsley carry them
+        m = 0.0; float rise = 0.0;
+        for (int k = 0; k < 18; k++){
+          float fk = float(k);
+          float ang = fk * 2.39996 + vSeed * 6.2832;
+          vec2 c = vec2(cos(ang), sin(ang)) * 0.80 * sqrt((fk + 0.5) / 18.0);
+          float f = smoothstep(0.19, 0.19 - aa, length(q - c));
+          if (f > m){ m = f; rise = c.y; }
+        }
+        // the dome catches light on top; florets underneath sit in its shade
+        col = mix(vec3(0.66, 0.74, 0.62), vec3(0.90, 0.93, 0.84), smoothstep(-0.8, 0.5, rise));   // soft, greenish cream
+      } else if (vKind < 1.5){
+        // buttercup: five rounded, glossy petals
+        float R = 0.62 + 0.36 * sqrt(abs(cos(a * 2.5)));
+        m = smoothstep(R, R - aa, r);
+        col = mix(vec3(0.66, 0.62, 0.22), vec3(0.78, 0.74, 0.32), smoothstep(0.05, 0.7, r));      // dull, sun-faded yellow
+        col += 0.10 * smoothstep(0.42, 0.0, length(q - vec2(-0.3, 0.3)));
+        col = mix(col, vec3(0.70, 0.55, 0.10), smoothstep(0.2, 0.08, r));
+      } else {
+        // tiny white star: five slim petals round a green-gold eye
+        float R = 0.25 + 0.72 * pow(abs(cos(a * 2.5)), 2.5);
+        m = smoothstep(R, R - aa, r);
+        col = mix(vec3(0.961, 0.976, 0.988), vec3(0.80, 0.74, 0.30), smoothstep(0.22, 0.08, r));
+      }
+      col *= 0.94 + 0.12 * vSeed;                // no two quite the same
+
+      // the same sun and shade as the grass, a little softened
+      col *= lightOf(0.25 + 0.75 * vShade);
+
+      float alpha = m * vLife;
+      alpha *= smoothstep(1.2, 3.2, vPx);         // too small to read: fade rather than speckle
       alpha *= 1.0 - smoothstep(fogN, fogF, vDepth);
-      if (alpha < 0.03) discard;
-      vec3 heart = (vPhase > 0.8) ? vec3(0.99,0.82,0.30) : vec3(0.97,0.88,0.42);
-      vec3 c = mix(heart, vec3(1.0), smoothstep(0.06, 0.24, d));
-      gl_FragColor = vec4(c, alpha);
+      if (alpha < 0.02) discard;
+      gl_FragColor = vec4(grade(col), alpha);
     }`
 });
 const flowers = new THREE.Points(fGeo, flowerMat);
@@ -702,7 +1649,7 @@ const stemMat = new THREE.ShaderMaterial({
   transparent: true, depthWrite: false,
   uniforms:{
     metaTex:{value: meta.tex}, windTex:{value: wind.tex}, span:{value: SPAN},
-    time: grassMat.uniforms.time,
+    time: TIME,
     windAmp: grassMat.uniforms.windAmp,
     windDir: grassMat.uniforms.windDir,
     heightScale: grassMat.uniforms.heightScale,
@@ -720,7 +1667,9 @@ const stemMat = new THREE.ShaderMaterial({
       vec2 fuv = (position.xz + vec2(span)) / (2.0*span);
       vec4 mt  = texture2D(metaTex, fuv);
       vec4 wo  = texture2D(windTex, fuv);
-      vLife = (1.0 - mt.r) * (1.0 - mt.b);
+      // the stem leads the regrowth: full height before its flower opens
+      float stemUp = smoothstep(0.0, 0.6, (1.0 - mt.r) * (1.0 - mt.b));
+      vLife = stemUp;
 
       float ground = terrainH(position.xz);
 
@@ -736,7 +1685,7 @@ const stemMat = new THREE.ShaderMaterial({
       float sway = sin(time*1.7 + aPhase*9.0) * windAmp * wo.a;
       p.x += windDir.x * sway * stem * 1.6;
       p.z += windDir.y * sway * stem * 1.6;
-      p.y *= 1.0 - mt.r*0.8;
+      p.y *= mix(0.2, 1.0, stemUp);
       p.y += ground;
 
       vec3 root  = vec3(position.x, ground, position.z);
@@ -750,9 +1699,10 @@ const stemMat = new THREE.ShaderMaterial({
     uniform float fogN, fogF;
     varying float vLife, vDepth;
     void main(){
-      float alpha = vLife * 0.85 * (1.0 - smoothstep(fogN, fogF, vDepth));
+      // stems are hairlines: let them go before they alias into noise
+      float alpha = vLife * 0.5 * (1.0 - smoothstep(7.0, 15.0, vDepth));
       if (alpha < 0.03) discard;
-      gl_FragColor = vec4(0.19, 0.44, 0.13, alpha);
+      gl_FragColor = vec4(0.17, 0.38, 0.11, alpha);   // stems: just above #27571A
     }`
 });
 const stems = new THREE.LineSegments(sGeo, stemMat);
@@ -760,69 +1710,307 @@ stems.frustumCulled = false;
 scene.add(stems);
 
 /* ────────────────────────────────────────────────────────
+   feather grass — tall plumes over the meadow: a hair-thin stalk
+   and a soft, streaming head that catches the morning light and
+   bows the furthest in the wind. lives and dies with the metadata
+──────────────────────────────────────────────────────── */
+const PLUMES = innerWidth > 900 ? 280 : 115;
+const plGeo = new THREE.InstancedBufferGeometry();
+{
+  const ROWS = 8, pos = [], idx = [];
+  for (let i=0;i<=ROWS;i++){ const y = i/ROWS; pos.push(-.5, y, 0, .5, y, 0); }
+  for (let i=0;i<ROWS;i++){ const a = i*2; idx.push(a, a+1, a+2, a+1, a+3, a+2); }
+  plGeo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  plGeo.setIndex(idx);
+}
+const plRoot = new Float32Array(PLUMES*3), plRnd = new Float32Array(PLUMES*4);
+for (let i=0;i<PLUMES;i++){
+  // loose drifts across the field
+  let x = 0, z = 0;
+  for (let tries=0; tries<10; tries++){
+    x = (Math.random()*2 - 1)*(SPAN - .8);
+    z = (Math.random()*2 - 1)*(SPAN - .8);
+    if (Math.random() < clamp((vnoise(x*.12 + 31.7, z*.12 + 9.2) - .36)/.3, 0, 1)) break;
+  }
+  plRoot[i*3] = x; plRoot[i*3+1] = terrainH(x, z); plRoot[i*3+2] = z;
+  plRnd[i*4]   = .72 + Math.random()*.32;     // height: just above the grass
+  plRnd[i*4+1] = Math.random()*Math.PI*2;     // sway phase
+  plRnd[i*4+2] = Math.random();               // tint and hair pattern
+  plRnd[i*4+3] = sunAtJS(x, z);               // baked sun at the root
+}
+plGeo.setAttribute('iRoot', new THREE.InstancedBufferAttribute(plRoot, 3));
+plGeo.setAttribute('iRnd',  new THREE.InstancedBufferAttribute(plRnd, 4));
+plGeo.instanceCount = PLUMES;
+const plumeMat = new THREE.ShaderMaterial({
+  transparent: true, depthWrite: false, side: THREE.DoubleSide,
+  uniforms:{
+    windTex:{value: wind.tex}, metaTex:{value: meta.tex}, span:{value: SPAN},
+    time: TIME, windAmp: grassMat.uniforms.windAmp, windDir: grassMat.uniforms.windDir,
+    heightScale: grassMat.uniforms.heightScale, sunDir: SUN_U,
+    fogCol:{value: FOG}, fogN: FOGN, fogF: FOGF,
+  },
+  vertexShader:`
+    attribute vec3 iRoot;
+    attribute vec4 iRnd;
+    uniform sampler2D windTex, metaTex;
+    uniform float time, span, windAmp, heightScale;
+    uniform vec2 windDir;
+    uniform vec3 sunDir;
+    varying vec2 vUv;
+    varying float vLife, vDepth, vSun, vLit, vSeed;
+    void main(){
+      vec2 fuv = (iRoot.xz + vec2(span)) / (2.0 * span);
+      vec4 wo = texture2D(windTex, fuv), mt = texture2D(metaTex, fuv);
+      vLife = (1.0 - mt.r) * (1.0 - mt.b);
+      float h = position.y;
+      float height = iRnd.x * heightScale * (1.0 - mt.r * 0.9);
+      // the plume is the top half: wide and soft there, a hair-thin stalk below
+      float head = smoothstep(0.50, 0.60, h);
+      float wid = mix(0.010, 0.015 + 0.075 * sin(3.14159 * clamp((h - 0.5) / 0.5, 0.0, 1.0)), head);
+      vec3 p = vec3(position.x * wid * 2.0, h * height, 0.0);
+      // turn the card to face the camera around its stalk
+      vec2 toCam = cameraPosition.xz - iRoot.xz;
+      float yaw = atan(toCam.x, toCam.y + 1e-4);
+      p = vec3(cos(yaw) * p.x, p.y, -sin(yaw) * p.x);
+      // tall stalks bow a long way: a slow sway plus the rolling gusts, most at the top
+      float wave = 0.5 + 0.5 * sin(dot(iRoot.xz, windDir) * 0.32 - time * 1.5 + sin(iRoot.x * 0.11) * 0.8);
+      float bow = (0.25 + sin(time * 1.3 + iRnd.y) * 0.35 + wave * wave * 1.2) * windAmp * 2.6 * wo.a;
+      vec2 lean = windDir * bow * h * h * height;
+      // trampling presses them over with the grass around them
+      lean += vec2(sin(3.14159 * (wo.r - 0.5)), sin(3.14159 * (wo.b - 0.5))) * h * height;
+      p.xz += lean;
+      p.y -= dot(lean, lean) * 0.35 / max(height, 0.01);   // the stalk keeps its length as it bends
+      vec3 world = p + iRoot;
+      vec4 mv = modelViewMatrix * vec4(world, 1.0);
+      vUv = vec2(position.x + 0.5, h);
+      vDepth = -mv.z; vSeed = iRnd.z; vLit = iRnd.w;
+      vSun = pow(max(dot(normalize(world - cameraPosition), sunDir), 0.0), 2.0);
+      gl_Position = projectionMatrix * mv;
+    }`,
+  fragmentShader:`
+    precision highp float;
+    uniform vec3 fogCol;
+    uniform float fogN, fogF;
+    varying vec2 vUv;
+    varying float vLife, vDepth, vSun, vLit, vSeed;
+    ${LIGHT_GLSL}
+    void main(){
+      if (vLife < 0.05) discard;
+      float x = abs(vUv.x - 0.5) * 2.0;           // 0 along the stalk, 1 at the card's edge
+      float y = vUv.y;
+      float head = smoothstep(0.50, 0.60, y);
+      float stalk = (1.0 - smoothstep(0.3, 0.9, x)) * (1.0 - head);
+      // the plume: soft-edged, with fine hairs streaming along its length
+      float hairs = 0.6 + 0.4 * sin(x * 34.0 + y * 8.0 + vSeed * 40.0);
+      float plume = head * (1.0 - smoothstep(0.2, 1.0, x)) * hairs * (1.0 - smoothstep(0.9, 1.0, y));
+      float a = max(stalk * 0.6, plume * 0.55) * vLife;
+      vec3 col = mix(vec3(0.38, 0.45, 0.22), mix(vec3(0.80, 0.75, 0.60), vec3(0.92, 0.87, 0.73), vSeed), head);
+      col *= lightOf(0.3 + 0.7 * vLit);
+      col += head * vSun * vec3(0.30, 0.26, 0.16);   // morning light glows through the plume
+      col = mix(col, fogCol, smoothstep(fogN, fogF, vDepth));
+      if (a < 0.02) discard;
+      gl_FragColor = vec4(grade(col), a);
+    }`
+});
+const plumes = new THREE.Mesh(plGeo, plumeMat);
+plumes.frustumCulled = false;
+scene.add(plumes);
+
+/* ────────────────────────────────────────────────────────
+   smoke, sparks and steam — a small pool of soft points
+──────────────────────────────────────────────────────── */
+const SMOKE = 0, SPARK = 1, STEAM = 2;
+const PMAX  = RM ? 120 : 280;
+const pPos  = new Float32Array(PMAX*3), pVel = new Float32Array(PMAX*3);
+const pT    = new Float32Array(PMAX).fill(-1);    // life fraction, -1 = free
+const pAge  = new Float32Array(PMAX), pLife = new Float32Array(PMAX);
+const pKind = new Float32Array(PMAX), pSeed = new Float32Array(PMAX);
+const pGeo  = new THREE.BufferGeometry();
+const aPPos = new THREE.BufferAttribute(pPos, 3).setUsage(THREE.DynamicDrawUsage);
+const aPT   = new THREE.BufferAttribute(pT, 1).setUsage(THREE.DynamicDrawUsage);
+const aPKind= new THREE.BufferAttribute(pKind, 1).setUsage(THREE.DynamicDrawUsage);
+const aPSeed= new THREE.BufferAttribute(pSeed, 1).setUsage(THREE.DynamicDrawUsage);
+pGeo.setAttribute('position', aPPos);
+pGeo.setAttribute('aT', aPT);
+pGeo.setAttribute('aKind', aPKind);
+pGeo.setAttribute('aSeed', aPSeed);
+const puffMat = new THREE.ShaderMaterial({
+  transparent: true, depthWrite: false,
+  uniforms:{ pxScale: PXSCALE, fogN: FOGN, fogF: FOGF },
+  vertexShader:`
+    attribute float aT, aKind, aSeed;
+    uniform float pxScale, fogN, fogF;
+    varying float vT, vKind, vFog;
+    void main(){
+      vec4 mv = modelViewMatrix * vec4(position, 1.0);
+      float d = -mv.z;
+      float size = aKind < 0.5 ? mix(0.35, 1.6, aT)          // smoke billows out
+                 : aKind < 1.5 ? 0.06                        // a spark stays a spark
+                 : mix(0.25, 1.1, aT);                       // steam
+      gl_PointSize = aT < 0.0 ? 0.0 : clamp(size * pxScale / d, 1.5, 160.0);
+      vT = aT; vKind = aKind; vFog = smoothstep(fogN, fogF, d);
+      gl_Position = projectionMatrix * mv;
+    }`,
+  fragmentShader:`
+    precision highp float;
+    varying float vT, vKind, vFog;
+    ${GRADE_GLSL}
+    void main(){
+      if (vT < 0.0) discard;
+      float r = length(gl_PointCoord - 0.5);
+      vec3 c; float a;
+      if (vKind < 0.5){
+        float m = smoothstep(0.5, 0.0, r); m *= m;
+        c = mix(vec3(0.17, 0.15, 0.14), vec3(0.66, 0.66, 0.64), smoothstep(0.0, 0.7, vT));
+        a = m * 0.30 * sin(3.14159 * vT);
+      } else if (vKind < 1.5){
+        float m = smoothstep(0.5, 0.1, r);
+        c = mix(vec3(1.0, 0.78, 0.35), vec3(0.95, 0.28, 0.05), vT);
+        a = m * (1.0 - vT);
+      } else {
+        float m = smoothstep(0.5, 0.0, r); m *= m;
+        c = vec3(0.93, 0.95, 0.96);
+        a = m * 0.34 * sin(3.14159 * vT);
+      }
+      a *= 1.0 - vFog;
+      if (a < 0.004) discard;
+      gl_FragColor = vec4(grade(c), a);
+    }`
+});
+const puffs = new THREE.Points(pGeo, puffMat);
+puffs.frustumCulled = false;
+puffs.renderOrder = 2;
+scene.add(puffs);
+
+let pNext = 0, pAny = false;
+function spawnAt(kind, p){
+  const x = (p % T)/(T-1)*2*SPAN - SPAN, z = ((p/T)|0)/(T-1)*2*SPAN - SPAN;
+  const i = pNext; pNext = (pNext + 1) % PMAX;
+  const r = Math.random, wd = grassMat.uniforms.windDir.value, j = i*3;
+  pPos[j]   = x + (r()-.5)*.15;
+  pPos[j+1] = terrainH(x, z) + .12 + r()*.2;
+  pPos[j+2] = z + (r()-.5)*.15;
+  if (kind === SPARK){
+    pVel[j] = (r()-.5)*.9; pVel[j+1] = 1.3 + r()*1.7; pVel[j+2] = (r()-.5)*.9;
+    pLife[i] = .5 + r()*.6;
+  } else if (kind === STEAM){
+    pVel[j] = wd.x*.25 + (r()-.5)*.2; pVel[j+1] = .7 + r()*.5; pVel[j+2] = wd.y*.25 + (r()-.5)*.2;
+    pLife[i] = 1.4 + r();
+  } else {
+    pVel[j] = wd.x*.4 + (r()-.5)*.18; pVel[j+1] = .5 + r()*.4; pVel[j+2] = wd.y*.4 + (r()-.5)*.18;
+    pLife[i] = 2.6 + r()*1.6;
+  }
+  pAge[i] = 0; pT[i] = 0; pKind[i] = kind; pSeed[i] = r();
+  aPKind.needsUpdate = aPSeed.needsUpdate = true;
+}
+function updateParticles(dt){
+  let live = 0;
+  for (let i=0;i<PMAX;i++){
+    if (pT[i] < 0) continue;
+    const age = pAge[i] += dt;
+    if (age >= pLife[i]){ pT[i] = -1; continue; }
+    live++;
+    const j = i*3;
+    if (pKind[i] === SPARK) pVel[j+1] -= 2.4*dt;
+    else { pVel[j] += Math.sin(age*1.9 + pSeed[i]*40)*.18*dt; pVel[j+1] *= 1 - .12*dt; }
+    pPos[j] += pVel[j]*dt; pPos[j+1] += pVel[j+1]*dt; pPos[j+2] += pVel[j+2]*dt;
+    pT[i] = age / pLife[i];
+  }
+  if (live || pAny) aPPos.needsUpdate = aPT.needsUpdate = true;
+  pAny = live > 0;
+}
+function updatePxScale(){
+  PXSCALE.value = renderer.getPixelRatio() * innerHeight / (2*Math.tan(camera.fov*Math.PI/360));
+}
+
+/* ────────────────────────────────────────────────────────
    brush cursor ring
 ──────────────────────────────────────────────────────── */
 const ring = new THREE.Mesh(
   new THREE.RingGeometry(.9, 1, 40),
-  new THREE.MeshBasicMaterial({color:'#cfe0b8', transparent:true, opacity:.55, side:THREE.DoubleSide, depthWrite:false})
+  new THREE.MeshBasicMaterial({color:'#eaf6d4', transparent:true, opacity:.6, side:THREE.DoubleSide, depthWrite:false})
 );
 ring.visible = false;
 scene.add(ring);
 
-const TOOL_COLORS = { step:'#cfe0b8', cut:'#d9bd4f', water:'#5aa7c7', fire:'#e07840' };
+const TOOL_COLORS = { step:'#eaf6d4', cut:'#f3d35a', water:'#82cbe9', fire:'#ff8a4a' };
 function updateRingScale(){
   const r = brushR / T * 2 * SPAN;   // texture px → world units
   ring.scale.set(r, r, 1);
 }
 
 /* ────────────────────────────────────────────────────────
-   brushes — everything writes pixels, never vertices
+   brushes — everything writes texels, never vertices
 ──────────────────────────────────────────────────────── */
 let tool = 'step';
 // per-view brush radius on touch: farther camera = bigger brush
-const MOBILE_RADIUS = { scenic: 4, angled: 5, top: 6 };
-let brushR = IS_MOBILE ? MOBILE_RADIUS.scenic : 9;  // radius in texture pixels
-const falloff = d => Math.max(0, 1 - d*d);
+const MOBILE_RADIUS = { scenic: 3, angled: 4, top: 5 };
+// default brush follows the window: 5 texels on a wide screen, down to 3 on a small one
+// (touch screens keep their per-view sizes instead)
+const defaultRadius = () => Math.round(clamp(2.5 + (innerWidth - 400)/1040*2.5, 3, 5));
+let brushR = IS_MOBILE ? MOBILE_RADIUS.scenic : defaultRadius();   // radius in texture pixels
+let userSized = false;          // once the size is picked by hand, resizing leaves it alone
+const falloff = d => 1 - d*d;
+const steamQ = [];                                  // texels that hissed this tick
 
-// port of draw_wind_override_circle: a sphere pressing the grass outward.
-// lean is strongest at the centre, fading to nothing at the rim.
-function stepBrush(px, py, rad, strength){
-  const x0 = Math.max(0, px-rad), x1 = Math.min(T-1, px+rad);
-  const y0 = Math.max(0, py-rad), y1 = Math.min(T-1, py+rad);
+// visit every texel inside a brush circle centred on a fractional texel
+function eachTexel(fx, fy, rad, fn){
+  const x0 = Math.max(0, Math.floor(fx - rad)), x1 = Math.min(T-1, Math.ceil(fx + rad));
+  const y0 = Math.max(0, Math.floor(fy - rad)), y1 = Math.min(T-1, Math.ceil(fy + rad));
   for (let y=y0; y<=y1; y++){
     for (let x=x0; x<=x1; x++){
-      const dx = (x-px)/rad, dy = (y-py)/rad;
-      const dist = Math.hypot(dx, dy);
-      if (dist >= 1) continue;
-      const inv = 1/Math.max(dist, 1e-4);
-      const lean = strength * (Math.PI/2) * Math.cos(dist * Math.PI/2);
-      const i = (y*T + x) * 4;
-      wind.data[i]   = 128 + ((lean * dx * inv / Math.PI) * 255) | 0;   // r: lean x
-      wind.data[i+2] = 128 + ((lean * dy * inv / Math.PI) * 255) | 0;   // b: lean z
-      wind.data[i+3] = (64 + 191 * dist) | 0;                            // a: wind dampened at centre
+      const dx = (x - fx)/rad, dy = (y - fy)/rad;
+      const d = Math.hypot(dx, dy);
+      if (d < 1) fn(y*T + x, dx, dy, d);
     }
   }
 }
 
-function metaBrush(px, py, rad, channel, amount){
-  const x0 = Math.max(0, px-rad), x1 = Math.min(T-1, px+rad);
-  const y0 = Math.max(0, py-rad), y1 = Math.min(T-1, py+rad);
-  for (let y=y0; y<=y1; y++){
-    for (let x=x0; x<=x1; x++){
-      const d = Math.hypot(x-px, y-py)/rad;
-      if (d >= 1) continue;
-      const i = (y*T + x)*4 + channel;
-      meta.data[i] = Math.min(255, meta.data[i] + amount*falloff(d));
+// trample: press the grass down and drag it along the stroke. the rim pushes outward like a footprint, the core
+// lies over in the direction you're moving
+function stepBrush(fx, fy, rad, mx, my, force){
+  const ml = Math.hypot(mx, my);
+  const ux = ml > .3 ? mx/ml : 0, uy = ml > .3 ? my/ml : 0;
+  eachTexel(fx, fy, rad, (p, dx, dy, d) => {
+    const press = Math.cos(d * Math.PI/2) * force;
+    const inv = d > 1e-4 ? 1/d : 0;
+    const out = (.25 + .75*d) * .7;
+    const tx = dx*inv*out + ux*(1.1 - .5*d);
+    const ty = dy*inv*out + uy*(1.1 - .5*d);
+    const k = Math.min(1, press*.9);
+    sim.dirX[p] += (tx - sim.dirX[p]) * k;
+    sim.dirZ[p] += (ty - sim.dirZ[p]) * k;
+    if (press > sim.crush[p]) sim.crush[p] += (press - sim.crush[p]) * .6;
+    if (sim.hold[p] < TRAMPLE_HOLD*press) sim.hold[p] = TRAMPLE_HOLD*press;
+  });
+}
+function cutBrush(fx, fy, rad){
+  eachTexel(fx, fy, rad, (p, dx, dy, d) => {
+    sim.cut[p] = Math.min(1, sim.cut[p] + .35*falloff(d));
+  });
+}
+function waterBrush(fx, fy, rad){
+  eachTexel(fx, fy, rad, (p, dx, dy, d) => {
+    const f = falloff(d);
+    sim.wet[p] = Math.min(1, sim.wet[p] + .28*f);
+    // dousing embers knocks the heat out and hisses
+    if (sim.heat[p] > .05){
+      sim.heat[p] = Math.max(0, sim.heat[p] - .5*f);
+      if (steamQ.length < 12) steamQ.push(p);
     }
-  }
+  });
 }
 
 /* ────────────────────────────────────────────────────────
-   fire — BFS over texture pixels, wet grass steams first
+   fire — BFS over texture pixels, wet grass steams first,
+   mown or already-burnt ground has nothing left to burn
 ──────────────────────────────────────────────────────── */
 const fires = [];
-function startFire(px, py, maxR){
+const MAX_FIRES = 24;
+function startFire(fx, fy, maxR){
+  const px = Math.round(fx), py = Math.round(fy);
   if (px<0 || px>=T || py<0 || py>=T) return;
+  if (fires.length >= MAX_FIRES) fires.shift();
   // per-fire silhouette: a table of radius multipliers around the circle.
   // every distance check divides by this, so the fire grows — and ends —
   // as an irregular blob unique to this ignition, never a circle
@@ -835,7 +2023,7 @@ function startFire(px, py, maxR){
       + 0.28*vnoise(Math.cos(th)*4.3 + seed*2.7, Math.sin(th)*4.3 + seed*2.7);
   }
   fires.push({
-    cx:px, cy:py, maxR, amount:10, rate:2, tick:0,
+    cx:px, cy:py, maxR, amount:10/255, rate:2, tick:0,
     frontR:1.5, shape,
     visited:new Set([py*T+px]),
     active:[py*T+px],
@@ -844,7 +2032,7 @@ function startFire(px, py, maxR){
 }
 
 // per-pixel jitter so the front edge is ragged, deterministic per pixel
-function pxJitter(p){ return ((p*2654435761 >>> 8) % 1000)/1000 - 0.5; }
+function pxJitter(p){ return jit[p] - 0.5; }
 
 // distance warped by the fire's silhouette in that direction
 function shapedDist(fire, dx, dy){
@@ -855,9 +2043,12 @@ function shapedDist(fire, dx, dy){
 }
 
 function processFires(){
+  const s = sim;
+  let burning = 0;
   for (let f=fires.length-1; f>=0; f--){
     const fire = fires[f];
     fire.tick++;
+    burning += fire.active.length;
     if (fire.tick % fire.rate) continue;
 
     // the front is a growing radius in *shaped* distance space: directions
@@ -877,89 +2068,144 @@ function processFires(){
       const x = p % T, y = (p/T)|0;
       const sd = shapedDist(fire, x - fire.cx, y - fire.cy);
       const distRatio = Math.min(1, Math.max(.1, 1.8*(fire.maxR - sd)/fire.maxR));
-      const i = p*4;
+
+      // no fuel: a mown strip or old burn is a firebreak
+      if (s.cut[p] > .8) continue;
 
       // soaked grass extinguishes the fire at this pixel outright
-      if (meta.data[i+1] > 140){
-        meta.data[i+1] = Math.max(0, meta.data[i+1] - 30);        // puff of steam
-        const b = meta.data[i+2];
-        if (b > 8){
-          if (b < 120) meta.data[i+2] = 0;                        // light scorch washes off
-          else { meta.data[i+2] = 250; meta.data[i] = 255; }      // heavy char stays, flame dies
+      if (s.wet[p] > .55){
+        s.wet[p] = Math.max(0, s.wet[p] - .12);                    // puff of steam
+        s.heat[p] *= .3;
+        if (s.char[p] > .03){
+          if (s.char[p] < .47) s.char[p] = 0;                      // light scorch washes off
+          else { s.char[p] = .98; s.cut[p] = 1; }                  // heavy char stays, flame dies
         }
+        if (steamQ.length < 12) steamQ.push(p);
         continue;                                                  // dropped from the fire front
       }
       // damp grass steams slowly — it resists far longer than dry
-      if (meta.data[i+1] > 8){
-        meta.data[i+1] = Math.max(0, meta.data[i+1] - (22*distRatio)|0);
+      if (s.wet[p] > .03){
+        s.wet[p] = Math.max(0, s.wet[p] - .086*distRatio);
+        if (Math.random() < .04 && steamQ.length < 12) steamQ.push(p);
         next.push(p);
         continue;
       }
-      const newBurn = Math.min(255, meta.data[i+2] + fire.amount);
-      meta.data[i+2] = newBurn;
+      const c = Math.min(1, s.char[p] + fire.amount);
+      s.char[p]   = c;
+      s.heat[p]   = Math.min(1, s.heat[p] + .2);
+      s.scorch[p] = CHAR_LINGER * (.8 + .4*jit[p]);
 
-      // burning grass shakes — noise into the wind override
-      wind.data[i]   = 128 + ((Math.random()-.5)*90)|0;
-      wind.data[i+2] = 128 + ((Math.random()-.5)*90)|0;
-
-      if (newBurn > 13){
+      if (c > .05){
         // 8 neighbours: with diagonals the discovery wave outruns the front
         // in every direction, so the noisy silhouette governs the shape
         const nbs = [p+1, p-1, p+T, p-T, p+T+1, p+T-1, p-T+1, p-T-1];
         for (const q of nbs){
           const qx = q % T, qy = (q/T)|0;
-          if (q<0 || q>=T*T || Math.abs(qx-x)>1 || Math.abs(qy-y)>1) continue;
+          if (q<0 || q>=N || Math.abs(qx-x)>1 || Math.abs(qy-y)>1) continue;
           if (shapedDist(fire, qx-fire.cx, qy-fire.cy) >= fire.maxR) continue;
           if (fire.visited.has(q)) continue;
           fire.visited.add(q);
           fire.pending.push(q);       // waits for the front, not immediate
         }
       }
-      if (newBurn < distRatio*255) next.push(p);        // keep burning
-      else if (newBurn > 242) meta.data[i] = 255;       // fully burnt → also cut
+      if (c < distRatio) next.push(p);           // keep burning
+      else s.cut[p] = Math.max(s.cut[p], Math.min(1, c*1.2));   // burnt down as far as it charred: stubble at the heart, singed at the rim
     }
     fire.active = next;
     if (!fire.active.length && !fire.pending.length) fires.splice(f, 1);
   }
+  return burning;
 }
 
 /* ────────────────────────────────────────────────────────
-   fixed-rate texture tick (30fps, like the article)
+   fixed-rate texture tick (30 a second, whatever the frame rate)
 ──────────────────────────────────────────────────────── */
-let tickCount = 0;
+const hotIdx = new Int32Array(N);
+let resetLeft = 0, fireLevel = 0;
+function poisson(l){ let n = 0, p = Math.exp(-l), acc = p; const u = Math.random(); while (u > acc && n < 40){ n++; p *= l/n; acc += p; } return n; }
+
 function textureTick(){
-  tickCount++;
+  const s = sim, wd = wind.px, md = meta.px, dt = TICK_DT;
 
-  // wind override springs back to neutral — slowly (~3s), and each pixel
-  // recovers at a slightly different rate so flattened patches un-crush
-  // unevenly instead of relaxing in lockstep
-  const w = wind.data;
-  for (let i=0;i<w.length;i+=4){
-    const rate = 0.996 + ((i>>2) & 3) * 0.0006;     // 0.996–0.9978 per tick
-    let r = w[i]-128;   w[i]   = 128 + (Math.abs(r)<2 ? 0 : r*rate|0);
-    let b = w[i+2]-128; w[i+2] = 128 + (Math.abs(b)<2 ? 0 : b*rate|0);
-    const a = w[i+3];   if (a < 255 && (tickCount & 1)) w[i+3] = Math.min(255, a+1);
-  }
-
-  // slow life, in stages: char heals back to green land first,
-  // and only fully-recovered ground starts regrowing grass
-  const m = meta.data;
-  const regrow = tickCount%2===0, dry = tickCount%4===0, heal = tickCount%3===0;
-  if (regrow || dry || heal){
-    for (let i=0;i<m.length;i+=4){
-      if (heal   && m[i+2] > 0) m[i+2]--;                 // char → green land (~25s)
-      if (regrow && m[i]   > 0 && m[i+2] === 0) m[i]--;   // then grass returns (~17s)
-      if (dry    && m[i+1] > 0) m[i+1]--;
+  // reset: everything relaxes back over half a second instead of snapping
+  if (resetLeft > 0){
+    resetLeft -= dt;
+    const k = resetLeft > 0 ? .78 : 0;
+    for (let p=0;p<N;p++){
+      s.crush[p] *= k; s.cut[p] *= k; s.wet[p] *= k; s.char[p] *= k; s.heat[p] *= k;
+      s.hold[p] = 0; s.scorch[p] = 0;
     }
   }
 
-  processFires();
+  const burning = processFires();
 
   // keep painting while the pointer is held still
-  if (lastHit){
-    if (tool==='step' && pointerIn) stepBrush(lastHit.px, lastHit.py, brushR, .55);
-    else if (isDown && tool==='cut')   metaBrush(lastHit.px, lastHit.py, brushR, 0, 90);
-    else if (isDown && tool==='water') metaBrush(lastHit.px, lastHit.py, brushR, 1, 70);
+  if (lastHit && pointerIn && performance.now() - lastMoveAt > 90){
+    if (tool === 'step') stepBrush(lastHit.fx, lastHit.fy, brushR, 0, 0, trampleForce());
+    else if (isDown && tool === 'cut')   cutBrush(lastHit.fx, lastHit.fy, brushR);
+    else if (isDown && tool === 'water') waterBrush(lastHit.fx, lastHit.fy, brushR);
+  }
+
+  // slow life, in stages. trampled grass holds flat, then stands back up;
+  // flame cools to a smoulder, char lingers, greys to ash, and only clean
+  // ground starts regrowing grass. each texel runs at its own pace
+  let hot = 0, charred = 0;
+  for (let p=0, i=0; p<N; p++, i+=4){
+    const j = jit[p];
+    let c = s.crush[p];
+    if (c > 0){
+      if (s.hold[p] > 0) s.hold[p] -= dt;
+      else { c = Math.max(0, c - dt/(TRAMPLE_RISE*(.75 + .5*j))); s.crush[p] = c; }
+    }
+    if (s.wet[p] > 0) s.wet[p] = Math.max(0, s.wet[p] - dt/WET_DRY);
+    let h = s.heat[p];
+    if (h > 0){
+      h = Math.max(0, h - dt/(HEAT_COOL*(.7 + .6*j)));
+      s.heat[p] = h;
+      if (h > .08) hotIdx[hot++] = p;
+    } else if (s.char[p] > 0){
+      if (s.scorch[p] > 0) s.scorch[p] -= dt;
+      else {
+        // the last of it lingers, so the ash greens over unhurried before the blades return
+        const c0 = s.char[p], slow = c0 < .12 ? .4 : c0 < .4 ? .75 : 1;
+        s.char[p] = Math.max(0, c0 - slow*dt/(CHAR_FADE*(.85 + .3*j)));
+      }
+    }
+    // blades only grow back once the burnt ground has greened over (char nearly gone)
+    if (s.cut[p] > 0 && h === 0 && s.char[p] < .015) s.cut[p] = Math.max(0, s.cut[p] - dt/CUT_REGROW);
+
+    // quantise for the gpu. smoothstep on the crush: slow to lift, slow to settle
+    const e = c*c*(3 - 2*c);
+    const dx = s.dirX[p] + fbX[p]*.15, dz = s.dirZ[p] + fbZ[p]*.15;
+    const k = MAX_LEAN * e / ((Math.hypot(dx, dz) || 1) * Math.PI) * 255;
+    wd[i]   = 127.5 + dx*k;
+    wd[i+1] = c*255;
+    wd[i+2] = 127.5 + dz*k;
+    wd[i+3] = 255 - 204*e;
+    md[i]   = s.cut[p]*255;
+    md[i+1] = s.wet[p]*255;
+    md[i+2] = s.char[p]*255;
+    md[i+3] = h*255;
+    if (s.char[p] > .01) charred++;
+  }
+  setGrassBurn(charred > 0 || fires.length > 0);
+
+  // smoke and sparks rise from whatever is hot, steam from whatever hissed
+  if (hot){
+    const want = Math.min(RM ? 1.5 : 3.5, hot*.003 + .25);
+    for (let k = Math.floor(want + Math.random()); k > 0; k--){
+      const p = hotIdx[(Math.random()*hot)|0];
+      spawnAt(!RM && s.heat[p] > .55 && Math.random() < .45 ? SPARK : SMOKE, p);
+    }
+  }
+  if (steamQ.length){
+    for (let k=0; k<Math.min(3, steamQ.length); k++) spawnAt(STEAM, steamQ[(Math.random()*steamQ.length)|0]);
+    Sound.hiss();
+    steamQ.length = 0;
+  }
+  fireLevel = Math.min(1, burning/160 + hot/2600);
+  if (Sound.enabled && (burning || hot)){
+    Sound.crackle(poisson(burning ? .3 + Math.min(1.4, burning/110) : Math.min(.3, hot/2500)));
   }
 
   wind.tex.needsUpdate = true;
@@ -972,16 +2218,138 @@ function textureTick(){
 ──────────────────────────────────────────────────────── */
 const off = document.createElement('canvas'); off.width = off.height = T;
 const offCtx = off.getContext('2d');
-const pWind = document.getElementById('windPreview').getContext('2d');
-const pMeta = document.getElementById('metaPreview').getContext('2d');
+const pWind = $('windPreview').getContext('2d');
+const pMeta = $('metaPreview').getContext('2d');
 pWind.imageSmoothingEnabled = pMeta.imageSmoothingEnabled = false;
+const shownW = new ImageData(T, T), shownM = new ImageData(T, T);
 
+// previews show rgb only: alpha carries data, not transparency
+function opaque(src, dst){
+  for (let i=0;i<src.length;i+=4){ dst[i]=src[i]; dst[i+1]=src[i+1]; dst[i+2]=src[i+2]; dst[i+3]=255; }
+}
 function drawPreviews(){
-  offCtx.putImageData(wind.img, 0, 0);
+  opaque(wind.data, shownW.data); offCtx.putImageData(shownW, 0, 0);
   pWind.clearRect(0,0,96,96); pWind.drawImage(off, 0,0,96,96);
-  offCtx.putImageData(meta.img, 0, 0);
+  opaque(meta.data, shownM.data); offCtx.putImageData(shownM, 0, 0);
   pMeta.clearRect(0,0,96,96); pMeta.drawImage(off, 0,0,96,96);
 }
+
+/* ────────────────────────────────────────────────────────
+   sound — synthesised on the fly, nothing to download.
+   off by default; the audio context only exists once asked for
+──────────────────────────────────────────────────────── */
+const Sound = (() => {
+  const AC = window.AudioContext || window.webkitAudioContext;
+  let ctx = null, out = null, noise = null, enabled = false, lastHiss = 0;
+  let rustleG, rustleBP, fireG, waterG;
+  const MASTER = .5;
+
+  const gainNode = v => { const g = ctx.createGain(); g.gain.value = v; return g; };
+  const filter = (type, f, q) => { const b = ctx.createBiquadFilter(); b.type = type; b.frequency.value = f; b.Q.value = q; return b; };
+  // a looping bed of noise through a chain of nodes
+  function bed(...chain){
+    const src = ctx.createBufferSource(); src.buffer = noise; src.loop = true;
+    let n = src; for (const x of chain){ n.connect(x); n = x; }
+    n.connect(out); src.start(0, Math.random()*1.5);
+  }
+  function build(){
+    ctx = new AC();
+    // a safety limiter only: a lower threshold makes the compressor add
+    // makeup gain, which is what made everything too loud
+    const lim = ctx.createDynamicsCompressor();
+    lim.threshold.value = -3; lim.knee.value = 0; lim.ratio.value = 12;
+    out = gainNode(0); out.connect(lim); lim.connect(ctx.destination);
+    noise = ctx.createBuffer(1, ctx.sampleRate*2, ctx.sampleRate);
+    const d = noise.getChannelData(0);
+    for (let i=0;i<d.length;i++) d[i] = Math.random()*2 - 1;
+    // rustle: an airy band of noise, opened up by how fast you sweep
+    rustleBP = filter('bandpass', 3400, .9); rustleG = gainNode(0);
+    bed(filter('highpass', 1200, .7), rustleBP, rustleG);
+    // fire: a low, soft roar that swells with the burning area
+    fireG = gainNode(0);
+    bed(filter('lowpass', 360, .5), fireG);
+    // water: a gentle wash while soaking
+    waterG = gainNode(0);
+    bed(filter('bandpass', 1300, .6), waterG);
+  }
+  function burst(t, dur, type, f, q, level, attack){
+    const src = ctx.createBufferSource(); src.buffer = noise;
+    const e = gainNode(0);
+    e.gain.setValueAtTime(0, t);
+    e.gain.linearRampToValueAtTime(level, t + attack);
+    e.gain.exponentialRampToValueAtTime(1e-4, t + attack + dur);
+    const flt = filter(type, f, q);
+    src.connect(flt); flt.connect(e); e.connect(out);
+    src.start(t, Math.random()*1.7, attack + dur + .02);
+  }
+  function tone(t, type, f0, f1, dur, level){
+    const o = ctx.createOscillator(), e = gainNode(0);
+    o.type = type;
+    o.frequency.setValueAtTime(f0, t);
+    o.frequency.exponentialRampToValueAtTime(f1, t + dur);
+    e.gain.setValueAtTime(0, t);
+    e.gain.linearRampToValueAtTime(level, t + .004);
+    e.gain.exponentialRampToValueAtTime(1e-4, t + dur);
+    o.connect(e); e.connect(out); o.start(t); o.stop(t + dur + .02);
+  }
+  return {
+    available: !!AC,
+    get enabled(){ return enabled; },
+    set(v){
+      if (!AC) return false;
+      if (v && !ctx) build();
+      if (!ctx) return true;
+      enabled = v;
+      const t = ctx.currentTime;
+      out.gain.cancelScheduledValues(t);
+      if (v){ ctx.resume(); out.gain.setTargetAtTime(MASTER, t, .08); }
+      else { out.gain.setTargetAtTime(0, t, .05); setTimeout(() => { if (!enabled) ctx.suspend(); }, 400); }
+      return true;
+    },
+    sleep(){ if (ctx && ctx.state === 'running') ctx.suspend(); },
+    wake(){ if (ctx && enabled) ctx.resume(); },
+    // continuous beds, called every frame
+    levels(stroke, fire, wet){
+      if (!enabled) return;
+      const t = ctx.currentTime;
+      rustleG.gain.setTargetAtTime(stroke * (.08 + .05*Math.random()), t, .035);
+      rustleBP.frequency.setTargetAtTime(2400 + Math.random()*3000, t, .04);
+      fireG.gain.setTargetAtTime(fire * .2, t, .3);
+      waterG.gain.setTargetAtTime(wet ? .03 : 0, t, .12);
+    },
+    snip(){
+      if (!enabled) return;
+      const t = ctx.currentTime;
+      burst(t,        .03, 'bandpass', 5200 + Math.random()*1200, 2.5, .13, .001);
+      burst(t + .024, .05, 'bandpass', 6800 + Math.random()*1200, 3.5, .08, .001);
+      tone(t + .02, 'triangle', 2600 + Math.random()*400, 2300, .08, .01);
+    },
+    crackle(n){
+      if (!enabled) return;
+      const t0 = ctx.currentTime;
+      for (let k=0;k<n;k++){
+        const g = Math.random();
+        burst(t0 + Math.random()*TICK_DT, .004 + Math.random()*.014, 'bandpass', 700 + Math.random()*3800, 1.1, .02 + g*g*g*.18, .0006);
+      }
+    },
+    drop(){
+      if (!enabled) return;
+      const f = 520 + Math.random()*500;
+      tone(ctx.currentTime, 'sine', f, f*1.9, .05 + Math.random()*.03, .02 + Math.random()*.015);
+    },
+    hiss(){
+      if (!enabled) return;
+      const t = ctx.currentTime;
+      if (t - lastHiss < .35) return;
+      lastHiss = t;
+      burst(t, .4, 'highpass', 3600, .7, .04, .05);
+    },
+    whoosh(){
+      if (!enabled) return;
+      burst(ctx.currentTime, .55, 'bandpass', 1100, .5, .05, .12);
+    },
+  };
+})();
 
 /* ────────────────────────────────────────────────────────
    pointer → ground plane → texture pixels
@@ -989,7 +2357,15 @@ function drawPreviews(){
 const ray = new THREE.Raycaster();
 const ndc = new THREE.Vector2();
 const UP_Z = new THREE.Vector3(0, 0, 1);
-let lastHit = null, isDown = false, pointerIn = false, interacted = false;
+let lastHit = null, prevHit = null, isDown = false, pointerIn = false, lastMoveAt = 0;
+let strokeAcc = 0, fireDist = 0, snipDist = 0, downAt = 0;
+// trample force: a hovering pointer only brushes the grass; pressing treads
+// it down, and harder the longer you hold — fully flat after ~1.4s
+function trampleForce(){
+  if (!isDown) return .42;
+  const t = Math.min(1, (performance.now() - downAt)/1400);
+  return .55 + .45*t*t*(3 - 2*t);
+}
 
 // raymarch the pointer ray against the terrain heightfield,
 // then bisect for a precise hit — same terrainH the shaders use
@@ -1011,11 +2387,8 @@ function hitField(e){
   if (hitT < 0) return null;
   const x = o.x + d.x*hitT, z = o.z + d.z*hitT;
   if (Math.abs(x) > SPAN || Math.abs(z) > SPAN) return null;
-  return {
-    x, z, y: terrainH(x, z),
-    px: Math.round((x+SPAN)/(2*SPAN)*(T-1)),
-    py: Math.round((z+SPAN)/(2*SPAN)*(T-1)),
-  };
+  const fx = (x+SPAN)/(2*SPAN)*(T-1), fy = (z+SPAN)/(2*SPAN)*(T-1);
+  return { x, z, y: terrainH(x, z), fx, fy };
 }
 
 function placeRing(hit){
@@ -1023,63 +2396,236 @@ function placeRing(hit){
   ring.quaternion.setFromUnitVectors(UP_Z, terrainNJS(hit.x, hit.z));
 }
 
+// walk from the previous stroke point to this one, so fast strokes stay continuous
+function along(from, to, fn){
+  const mx = to.fx - from.fx, my = to.fy - from.fy;
+  const len = Math.hypot(mx, my);
+  if (len > brushR*6){ fn(to.fx, to.fy, 0, 0); return 0; }   // a jump, not a stroke
+  const steps = Math.min(12, Math.max(1, Math.ceil(len / (brushR*.45))));
+  for (let s=1; s<=steps; s++){ const k = s/steps; fn(from.fx + mx*k, from.fy + my*k, mx, my); }
+  return len;
+}
+
 function applyAt(hit, fromDown){
-  if (!hit) return;
-  if (tool==='step')       stepBrush(hit.px, hit.py, brushR, .55);
-  else if (!isDown)        return;
-  else if (tool==='cut')   metaBrush(hit.px, hit.py, brushR, 0, 90);
-  else if (tool==='water') metaBrush(hit.px, hit.py, brushR, 1, 70);
-  else if (tool==='fire' && fromDown) startFire(hit.px, hit.py, Math.round(brushR*2.1));
-  if (!interacted){ interacted = true; setTimeout(()=>hint.style.opacity=0, 1400); }
+  const from = (!fromDown && prevHit) ? prevHit : hit;
+  if (tool === 'step'){
+    const f = trampleForce();
+    const len = along(from, hit, (fx, fy, mx, my) => stepBrush(fx, fy, brushR, mx, my, f));
+    strokeAcc += len * (.35 + .65*f);
+    noteInteraction(len);
+    return;
+  }
+  if (!isDown) return;
+  if (tool === 'cut'){
+    const len = along(from, hit, (fx, fy) => cutBrush(fx, fy, brushR));
+    strokeAcc += len*.6;
+    snipDist += len;
+    if (fromDown || snipDist > brushR*.9){ snipDist = 0; Sound.snip(); }
+  } else if (tool === 'water'){
+    along(from, hit, (fx, fy) => waterBrush(fx, fy, brushR));
+  } else if (tool === 'fire'){
+    if (fromDown) startFire(hit.fx, hit.fy, Math.round(brushR*2.1));
+    else {
+      fireDist += Math.hypot(hit.fx - from.fx, hit.fy - from.fy);
+      if (fireDist > brushR*1.5){ fireDist = 0; startFire(hit.fx, hit.fy, Math.round(brushR*1.4)); }
+    }
+  }
+  noteInteraction(40);
 }
 
 canvas.addEventListener('pointermove', e=>{
   const hit = hitField(e);
   pointerIn = !!hit;
-  lastHit = hit || lastHit;
   ring.visible = !!hit;
-  if (hit){
-    placeRing(hit);
-    applyAt(hit, false);
-  }
+  updateCursor();
+  if (!hit){ prevHit = null; return; }
+  placeRing(hit);
+  applyAt(hit, false);
+  lastHit = prevHit = hit;
+  lastMoveAt = performance.now();
 });
 canvas.addEventListener('pointerdown', e=>{
+  if (e.button > 0) return;
+  setHelp(false);
   isDown = true;
-  canvas.setPointerCapture(e.pointerId);
+  downAt = performance.now();
+  try { canvas.setPointerCapture(e.pointerId); } catch (err) { /* already released: nothing to capture */ }
   const hit = hitField(e);
-  pointerIn = !!hit; lastHit = hit || lastHit;
-  if (hit){ ring.visible = true; placeRing(hit); }
+  pointerIn = !!hit;
+  updateCursor();
+  if (!hit) return;
+  ring.visible = true; placeRing(hit);
+  fireDist = snipDist = 0;
   applyAt(hit, true);
+  lastHit = prevHit = hit;
+  lastMoveAt = performance.now();
 });
-addEventListener('pointerup', ()=>{ isDown = false; });
-canvas.addEventListener('pointerleave', ()=>{ pointerIn = false; ring.visible = false; });
+function release(e){
+  isDown = false;
+  // fingers don't hover: once lifted, nothing is under them
+  if (e.pointerType !== 'mouse'){ pointerIn = false; ring.visible = false; prevHit = null; }
+  updateCursor();
+}
+addEventListener('pointerup', release);
+addEventListener('pointercancel', release);
+canvas.addEventListener('pointerleave', ()=>{ pointerIn = false; ring.visible = false; prevHit = null; updateCursor(); });
 
 /* ────────────────────────────────────────────────────────
    UI
 ──────────────────────────────────────────────────────── */
-const hint = document.getElementById('hint');
+const guide = $('guide'), guideIco = $('guideIco'), guideCopy = $('guideCopy');
+const guideName = $('guideName'), guideText = $('guideText');
+const toolsEl = $('tools');
+const toolButtons = [...document.querySelectorAll('.tool[data-tool]')];
 
-const inspectorEl = document.getElementById('inspector');
-const dataToggle  = document.getElementById('dataToggle');
+// first-run coach: appears after a beat, leaves once the grass has been touched
+const coach = $('coach');
+let engaged = 0, coachDone = false;
+$('coachTitle').textContent = COARSE ? 'drag across the grass' : 'sweep across the grass';
+if (RM){
+  coach.querySelectorAll('animate, animateMotion').forEach(a => a.remove());
+  coach.querySelector('.g-tip').setAttribute('transform', 'translate(56 24)');
+}
+setTimeout(() => { if (!coachDone) coach.classList.add('show'); }, 700);
+
+function noteInteraction(amount){
+  if (amount <= 0) return;
+  const first = engaged === 0;
+  engaged += amount;
+  if (!coachDone && engaged > 24){
+    coachDone = true;
+    setTimeout(() => { coach.classList.remove('show'); coach.classList.add('gone'); }, 450);
+  }
+  if (first) wakeGuide();
+}
+
+// in compact mode the guide is a pill that steps aside once you're playing
+let guideTimer = 0;
+function wakeGuide(){
+  if (!COMPACT) return;
+  guide.classList.remove('idle');
+  clearTimeout(guideTimer);
+  guideTimer = setTimeout(() => { if (engaged > 0) guide.classList.add('idle'); }, 4200);
+}
+function renderGuide(animate){
+  const info = TOOL_INFO[tool];
+  guide.dataset.tool = tool;
+  guideIco.innerHTML = ICONS[tool];
+  guideName.textContent = info.name;
+  guideText.textContent = COMPACT ? info.short : info.text;
+  if (animate && !RM){ guideCopy.classList.remove('swap'); void guideCopy.offsetWidth; guideCopy.classList.add('swap'); }
+}
+
+/* ────────────────────────────────────────────────────────
+   cursors — a precise dot at the hotspot, with the tool's glyph in a
+   small badge beside it. the badge fills while pressing; over the sky,
+   where nothing happens, it's a plain arrow. smaller on small screens
+──────────────────────────────────────────────────────── */
+const rootStyle = getComputedStyle(document.documentElement);
+const CURSOR_INK = Object.fromEntries(['step', 'cut', 'water', 'fire'].map(k => [k, rootStyle.getPropertyValue('--' + k).trim()]));
+const glyph = k => ICONS[k].replace(/^<svg[^>]*>/, '').replace(/<\/svg>$/, '');
+function cursorSVG(k, pressed, px){
+  const ink = CURSOR_INK[k];
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${px}" height="${px}" viewBox="0 0 32 32">`
+    + `<circle cx="5" cy="5" r="3.6" fill="#fff"/>`
+    + `<circle cx="5" cy="5" r="1.8" fill="#1d2f17"/>`
+    + `<circle cx="19.6" cy="19.8" r="10.6" fill="#14280e" fill-opacity=".16"/>`
+    + `<circle cx="19" cy="19" r="10" fill="${pressed ? ink : '#fff'}"/>`
+    + `<g transform="translate(19 19) scale(.6) translate(-12 -12)" fill="none" stroke="${pressed ? '#fff' : ink}"`
+    + ` stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round">${glyph(k)}</g></svg>`;
+}
+let CURSORS = {}, cursorPx = 0, cursorKey = '';
+function buildCursors(){
+  const px = innerWidth < 900 ? 24 : 32;
+  if (px === cursorPx) return;
+  cursorPx = px;
+  const hot = Math.round(5 * px/32);
+  const url = (k, down, size) => `url("data:image/svg+xml,${encodeURIComponent(cursorSVG(k, down, size))}")`;
+  CURSORS = {};
+  for (const k of Object.keys(CURSOR_INK)) for (const down of [false, true]){
+    const one = url(k, down, px), two = url(k, down, px*2);
+    // image-set keeps the cursor crisp on retina; each step falls back if unsupported
+    CURSORS[k + (down ? ':down' : '')] = [
+      `-webkit-image-set(${one} 1x, ${two} 2x) ${hot} ${hot}, crosshair`,
+      `image-set(${one} 1x, ${two} 2x) ${hot} ${hot}, crosshair`,
+      `${one} ${hot} ${hot}, crosshair`,
+    ];
+  }
+  cursorKey = '';
+  updateCursor();
+}
+function updateCursor(){
+  const key = !pointerIn ? 'off' : tool + (isDown ? ':down' : '');
+  if (key === cursorKey) return;
+  cursorKey = key;
+  const st = canvas.style;
+  if (key === 'off'){ st.cursor = 'default'; return; }
+  for (const v of CURSORS[key]){ st.cursor = ''; st.cursor = v; if (st.cursor) break; }
+}
+
+function setTool(name){
+  if (!has(TOOL_INFO, name)) return;
+  const changed = name !== tool;
+  tool = name;
+  toolButtons.forEach(b => b.setAttribute('aria-pressed', String(b.dataset.tool === name)));
+  toolsEl.dataset.tool = name;
+  ring.material.color.set(TOOL_COLORS[name]);
+  renderGuide(changed);
+  wakeGuide();
+  updateCursor();
+}
+toolButtons.forEach(b => b.addEventListener('click', () => setTool(b.dataset.tool)));
+
+const radiusInput = $('radius');
+function setRadius(r){
+  brushR = clamp(Math.round(r), 2, 16);
+  radiusInput.value = brushR;
+  radiusInput.style.setProperty('--fill', ((brushR - 2)/14*100).toFixed(1) + '%');
+  updateRingScale();
+}
+radiusInput.addEventListener('input', e => { userSized = true; setRadius(+e.target.value); });
+setRadius(brushR);
+
+const inspectorEl = $('inspector'), dataBtn = $('dataBtn'), perfLine = $('perfLine');
 let inspectorOpen = false;
 function setInspector(open){
   inspectorOpen = open;
-  inspectorEl.classList.toggle('hidden', !open);
-  dataToggle.textContent = open ? 'hide data' : 'show data';
-  dataToggle.setAttribute('aria-expanded', String(open));
-  if (open) drawPreviews();
+  inspectorEl.hidden = !open;
+  dataBtn.setAttribute('aria-expanded', String(open));
+  if (open){ setHelp(false); drawPreviews(); updatePerfLine(); }
 }
-dataToggle.addEventListener('click', ()=>setInspector(!inspectorOpen));
-const toolButtons = [...document.querySelectorAll('.tools button[data-tool]')];
-function setTool(name){
-  tool = name;
-  toolButtons.forEach(b => b.setAttribute('aria-pressed', String(b.dataset.tool===name)));
-  ring.material.color.set(TOOL_COLORS[name]);
-}
-toolButtons.forEach(b => b.addEventListener('click', ()=>setTool(b.dataset.tool)));
+dataBtn.addEventListener('click', () => setInspector(!inspectorOpen));
 
-document.getElementById('radius').addEventListener('input', e=>{ brushR = +e.target.value; updateRingScale(); });
-updateRingScale();
+const helpEl = $('help'), helpBtn = $('helpBtn');
+let helpOpen = false;
+function setHelp(open){
+  if (open === helpOpen) return;
+  helpOpen = open;
+  helpEl.hidden = !open;
+  helpBtn.setAttribute('aria-expanded', String(open));
+  if (open) setInspector(false);
+}
+helpBtn.addEventListener('click', () => setHelp(!helpOpen));
+
+const toastEl = $('toast');
+let toastTimer = 0;
+function toast(msg){
+  toastEl.textContent = msg;
+  toastEl.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => toastEl.classList.remove('show'), 2600);
+}
+
+const soundBtn = $('soundBtn');
+let soundTold = false;
+function toggleSound(){
+  const v = !Sound.enabled;
+  if (!Sound.set(v)){ toast('sound isn’t supported in this browser'); return; }
+  soundBtn.setAttribute('aria-pressed', String(v));
+  soundBtn.title = v ? 'sound is on (M)' : 'sound is off (M)';
+  if (v && !soundTold){ soundTold = true; toast('sound on · rustle, snip, crackle'); }
+}
+soundBtn.addEventListener('click', toggleSound);
 
 /* views: scenic (horizon), angled (workbench), top (map).
    the camera eases between them; brushes work identically in all three */
@@ -1096,62 +2642,174 @@ function fitTopView(){
 }
 fitTopView();
 const VIEW_ORDER = ['scenic','angled','top'];
-let viewName = 'scenic';
-const camPos = VIEWS.scenic.pos.clone();
-const camTgt = VIEWS.scenic.tgt.clone();
+let viewName = VIEW_ORDER.includes(Q.get('view')) ? Q.get('view') : 'scenic';
+const camPos = VIEWS[viewName].pos.clone();
+const camTgt = VIEWS[viewName].tgt.clone();
 const viewButtons = [...document.querySelectorAll('.views button[data-view]')];
 function setView(name){
   viewName = name;
+  setBladeDetail(name === 'top');
   viewButtons.forEach(b => b.setAttribute('aria-pressed', String(b.dataset.view===name)));
-  if (IS_MOBILE){ brushR = MOBILE_RADIUS[name]; updateRingScale(); }
+  if (IS_MOBILE && !userSized) setRadius(MOBILE_RADIUS[name]);
 }
 viewButtons.forEach(b => b.addEventListener('click', ()=>setView(b.dataset.view)));
 
+const resetBtn = $('reset');
 function resetField(){
   fires.length = 0;
-  const w = wind.data, m = meta.data;
-  for (let i=0;i<w.length;i+=4){
-    w[i]=128; w[i+1]=0; w[i+2]=128; w[i+3]=255;
-    m[i]=0;   m[i+1]=0; m[i+2]=0;   m[i+3]=255;
-  }
-  wind.tex.needsUpdate = meta.tex.needsUpdate = true;
-  drawPreviews();
+  resetLeft = .5;
+  Sound.whoosh();
+  if (!RM){ resetBtn.classList.remove('spin'); void resetBtn.offsetWidth; resetBtn.classList.add('spin'); }
 }
-document.getElementById('reset').addEventListener('click', resetField);
+resetBtn.addEventListener('click', resetField);
 
 addEventListener('keydown', e=>{
-  if (e.key==='1') setTool('step');
-  else if (e.key==='2') setTool('cut');
-  else if (e.key==='3') setTool('water');
-  else if (e.key==='4') setTool('fire');
-  else if (e.key==='r' || e.key==='R') resetField();
-  else if (e.key==='d' || e.key==='D') setInspector(!inspectorOpen);
-  else if (e.key==='v' || e.key==='V')
-    setView(VIEW_ORDER[(VIEW_ORDER.indexOf(viewName)+1) % VIEW_ORDER.length]);
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  const k = e.key;
+  if (k==='1') setTool('step');
+  else if (k==='2') setTool('cut');
+  else if (k==='3') setTool('water');
+  else if (k==='4') setTool('fire');
+  else if (k==='['){ userSized = true; setRadius(brushR - 1); }
+  else if (k===']'){ userSized = true; setRadius(brushR + 1); }
+  else if (e.repeat) return;
+  else if (k==='r' || k==='R') resetField();
+  else if (k==='d' || k==='D') setInspector(!inspectorOpen);
+  else if (k==='m' || k==='M') toggleSound();
+  else if (k==='?' || k==='h' || k==='H') setHelp(!helpOpen);
+  else if (k==='Escape'){ setHelp(false); setInspector(false); }
+  else if (k==='v' || k==='V')
+    setView(VIEW_ORDER[(VIEW_ORDER.indexOf(viewName) + (e.shiftKey ? 2 : 1)) % VIEW_ORDER.length]);
 });
 
 /* ────────────────────────────────────────────────────────
-   main loop
+   adaptive quality — quality first. the look never changes: the
+   only thing that adapts is a little resolution (2× → 1.5×), which
+   the soft-focus film hides. fewer blades and no soft focus are an
+   emergency floor, only for a device below 20 fps that would
+   otherwise stutter. steps back up only into tiers that never
+   struggled; if resolution steps change nothing, the cap is the
+   display or the cpu, so it undoes them and stops
+──────────────────────────────────────────────────────── */
+const BASE_DPR = Math.min(devicePixelRatio || 1, 2);
+const TIERS = [[2, 1], [1.75, 1], [1.5, 1], [1.5, .75], [1.25, .625], [1, .5]]
+  .map(([dpr, share]) => ({ dpr: Math.min(dpr, BASE_DPR), share }))
+  .filter((t, i, a) => i === 0 || t.dpr !== a[i-1].dpr || t.share !== a[i-1].share);
+let tier = 0;
+function applyTier(i){
+  tier = i;
+  const { dpr, share } = TIERS[i];
+  renderer.setPixelRatio(dpr);
+  renderer.setSize(innerWidth, innerHeight);
+  sizeSky();
+  grassMat.uniforms.keep.value = share >= 1 ? 1.01 : share;   // thinned evenly in the shader
+  // fewer blades, each a little wider, so the field keeps its cover
+  grassMat.uniforms.bladeW.value = Math.min(1.7, Math.pow(1/share, .35));
+  updatePxScale();
+  // the soft-focus pass is part of the look; it only goes in the emergency tiers
+  document.documentElement.classList.toggle('soft-off', share < 1);
+  if (inspectorOpen) updatePerfLine();
+}
+const FPS_OK = 36, FPS_DIRE = 20;        // below OK: ease the resolution; below DIRE: the emergency tiers
+const THIN_FROM = TIERS.findIndex(t => t.share < 1);
+// a steady 30 reads smoother than a rate that wanders between 25 and 50, so a
+// machine that can't hold 50 is paced to 30. it changes nothing on screen
+// the cap is re-tested now and then (30 s, then 60, … up to 4 min), in case the
+// slow stretch was only the page loading or something else busy for a while
+let fpsCap = false;
+const perf = { frames:0, time:0, warm:3, low:0, high:0, slow:0, capped:0, retest:30, fps:60, probe:null, flat:0, flatFrom:0,
+               locked: QUALITY === 'high', failed: new Uint8Array(TIERS.length), told:false };
+function updatePerfLine(){
+  perfLine.textContent = `${Math.round(MAX_BLADES*TIERS[tier].share/1000)}k blades · ${TIERS[tier].dpr}× res · ${Math.round(perf.fps)} fps${fpsCap ? ' · paced to a steady 30' : ''}`;
+}
+function perfSample(raw){
+  if (raw > .25){ perf.frames = perf.time = 0; return; }   // a hitch or a background tab, not a fair sample
+  perf.frames++; perf.time += raw;
+  if (perf.time < 1) return;
+  const fps = perf.frames / perf.time;
+  perf.frames = perf.time = 0;
+  perf.fps = fps;
+  if (inspectorOpen) updatePerfLine();
+  if (perf.warm > 0){ perf.warm--; return; }
+  if (!fpsCap){
+    if (fps < 50){ if (++perf.slow >= 3){ fpsCap = true; perf.slow = perf.low = perf.capped = 0; perf.warm = 1; return; } }
+    else perf.slow = 0;
+  } else if (++perf.capped >= perf.retest){
+    fpsCap = false; perf.capped = 0; perf.warm = 1;
+    perf.retest = Math.min(perf.retest*2, 240);
+    return;
+  }
+  if (perf.locked) return;
+
+  if (perf.probe){
+    const helped = fps > perf.probe.fps * 1.08;
+    if (helped) perf.flat = 0;
+    else if (++perf.flat === 1) perf.flatFrom = perf.probe.from;
+    else if (fps >= FPS_DIRE){ applyTier(perf.flatFrom); perf.locked = true; perf.probe = null; return; }
+    else perf.flat = 0;     // resolution isn't the limit and it's still far too slow: go on into fewer blades
+    perf.probe = null;
+  }
+  // paced to 30, only a machine that can't keep up with that counts as struggling
+  const floor = (THIN_FROM > 0 && tier + 1 >= THIN_FROM) ? FPS_DIRE : (fpsCap ? 27 : FPS_OK);
+  if (fps < floor){
+    perf.high = 0;
+    if (++perf.low >= 3 && tier < TIERS.length - 1){
+      perf.failed[tier] = 1;
+      perf.probe = { from: tier, fps };
+      applyTier(tier + 1);
+      perf.low = 0; perf.warm = 1;
+      if (!perf.told){ perf.told = true; toast('lowered detail to keep it smooth'); }
+    }
+  } else {
+    perf.low = 0;
+    if (fps > 57 && tier > 0 && !perf.failed[tier - 1]){
+      if (++perf.high >= 8){ applyTier(tier - 1); perf.high = 0; perf.warm = 1; }
+    } else perf.high = 0;
+  }
+}
+let startTier = 0;
+if (QUALITY === 'low') startTier = Math.max(0, TIERS.findIndex(t => t.share <= .5));
+else if (QUALITY !== 'high' && COARSE) startTier = Math.max(0, TIERS.findIndex(t => t.dpr <= 1.5));
+applyTier(startTier);
+
+/* ────────────────────────────────────────────────────────
+   main loop — pauses when the canvas is off-screen or the tab is hidden
 ──────────────────────────────────────────────────────── */
 addEventListener('resize', ()=>{
   camera.aspect = innerWidth/innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
+  sizeSky();
   fitTopView();
+  fpsCap = false; perf.slow = 0; perf.warm = Math.max(perf.warm, 2);   // a new size: measure the pace again
+  updatePxScale();
+  if (!userSized && !IS_MOBILE) setRadius(defaultRadius());
+  buildCursors();
 });
 
-const clock = new THREE.Clock();
-let tickAcc = 0;
-function frame(){
-  requestAnimationFrame(frame);
-  const dt = Math.min(clock.getDelta(), .1);
-  const t  = clock.elapsedTime;
+let simTime = 0, tickAcc = 0, lastNow = 0, rafId = 0, running = false;
+let strokeLevel = 0, dropT = 0;
+const CAP_MS = 1000/30;
+let nextSlot = 0;
+function frame(now){
+  rafId = requestAnimationFrame(frame);
+  if (fpsCap && lastNow){
+    // paced: render on 30-a-second slots. scheduling slots (rather than gaps
+    // between frames) keeps the average at 30 on 50, 60, 75 or 120 Hz screens
+    if (now < nextSlot - 2) return;
+    nextSlot = now - nextSlot > CAP_MS ? now + CAP_MS : nextSlot + CAP_MS;
+  }
+  const raw = lastNow ? (now - lastNow)/1000 : 1/60;
+  lastNow = now;
+  const dt = Math.max(0, Math.min(raw, .1));
+  simTime += dt;
+  const t = simTime;
+  perfSample(raw);
 
   // gusty wind
   const gust = (0.5 + 0.5*Math.sin(t*.33)) * (0.5 + 0.5*Math.sin(t*.121 + 2));
-  grassMat.uniforms.time.value = t;
+  TIME.value = t;
   grassMat.uniforms.windAmp.value = (RM ? .02 : .065) + (RM ? .006 : .04)*gust;
-  grassMat.uniforms.windDir.value.set(.88, .38).normalize();   // steady single direction
 
   if (!RM) skyMat.uniforms.time.value = t;
   const v = VIEWS[viewName];
@@ -1162,25 +2820,69 @@ function frame(){
   // range so the field stays crisp even when portrait aspect forces a
   // high camera; scenic/angled keep the horizon haze
   const topH = VIEWS.top.pos.y;
-  const wantN = (viewName === 'top') ? topH + 10 : 19;
-  const wantF = (viewName === 'top') ? topH + 40 : 46;
+  const wantN = (viewName === 'top') ? topH + 10 : 6;
+  const wantF = (viewName === 'top') ? topH + 40 : 64;
   FOGN.value += (wantN - FOGN.value) * k;
   FOGF.value += (wantF - FOGF.value) * k;
+  // distance detail starts past the near field; from straight above everything
+  // sits at about the same distance, so there it starts beyond the whole field
+  const lod = grassMat.uniforms.lodNear;
+  lod.value += (((viewName === 'top') ? topH + 12 : 11) - lod.value) * k;
   // scenic view trims blade height a touch so the low camera isn't buried
   const wantH = ((viewName === 'scenic') ? 0.85 : 1.0) * (IS_MOBILE ? 0.78 : 1.0);
   const hs = grassMat.uniforms.heightScale;
   hs.value += (wantH - hs.value) * k;
+  // from straight above the camera is far off, so flower heads grow to stay readable
+  const fh = flowerMat.uniforms.headScale;
+  fh.value += ((viewName === 'top' ? 2.4 : 1.0) - fh.value) * k;
   camera.position.set(camPos.x, camPos.y + (RM ? 0 : Math.sin(t*.3)*.04), camPos.z);
   camera.lookAt(camTgt);
 
   tickAcc += dt;
-  const step = 1/TICK_HZ;
-  while (tickAcc >= step){ tickAcc -= step; textureTick(); }
+  while (tickAcc >= TICK_DT){ tickAcc -= TICK_DT; textureTick(); }
+  updateParticles(dt);
 
+  // sound follows the hand: rustle with stroke speed, patter while soaking
+  const speed = strokeAcc / Math.max(dt, 1e-3);
+  strokeLevel += (Math.min(1, speed/140) - strokeLevel) * (1 - Math.exp(-dt*14));
+  strokeAcc = 0;
+  const watering = isDown && pointerIn && tool === 'water';
+  Sound.levels(strokeLevel, fireLevel, watering);
+  if (watering && (dropT -= dt) <= 0){ Sound.drop(); dropT = .05 + Math.random()*.12; }
+
+  if (skyInView() && (++skyTick % 3 === 0 || skyMoved())){
+    renderer.setRenderTarget(skyRT);
+    renderer.render(skyScene, camera);
+    renderer.setRenderTarget(null);
+    skyAt.copy(camera.position); camera.getWorldDirection(skyLook);
+  }
   renderer.render(scene, camera);
 }
-drawPreviews();
-frame();
+function setRunning(want){
+  if (want === running) return;
+  running = want;
+  if (want){
+    lastNow = 0; perf.frames = perf.time = 0; perf.warm = Math.max(perf.warm, 1);
+    rafId = requestAnimationFrame(frame);
+    Sound.wake();
+  } else {
+    cancelAnimationFrame(rafId);
+    Sound.sleep();
+  }
+}
+let onScreen = true;
+function syncRunning(){ setRunning(onScreen && !document.hidden); }
+if ('IntersectionObserver' in window){
+  new IntersectionObserver(es => { onScreen = es[es.length-1].isIntersecting; syncRunning(); }).observe(canvas);
+}
+document.addEventListener('visibilitychange', syncRunning);
+
+buildCursors();
+// compile the dissolving grass up front, so the first fire doesn't stutter
+setGrassBurn(true); renderer.compile(scene, camera); setGrassBurn(false);
+setTool(has(TOOL_ALIAS, Q.get('tool')) ? TOOL_ALIAS[Q.get('tool')] : 'step');
+setView(viewName);
+syncRunning();
 })();
 </script>
 </body>
